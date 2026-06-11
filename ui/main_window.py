@@ -123,19 +123,19 @@ class MainWindow(QMainWindow):
         self.pages_container = QStackedWidget()
         
         self.page_form = FormPage(self.db_manager, self.handle_form_submitted)
-        self.page_history = HistoryPage(self.db_manager, self.handle_history_patient_selected)
-        self.page_monitor = MonitorPage(self.ble_worker)
+        self.page_monitor = MonitorPage(self.ble_worker)      
+        self.page_history = HistoryPage(self.db_manager, self.handle_history_patient_selected) 
 
-        self.pages_container.addWidget(self.page_form)       
-        self.pages_container.addWidget(self.page_history)    
-        self.pages_container.addWidget(self.page_monitor)    
+        self.pages_container.addWidget(self.page_form)        # Indeks 0
+        self.pages_container.addWidget(self.page_monitor)     # Indeks 1
+        self.pages_container.addWidget(self.page_history)     # Indeks 2
         
         right_layout.addWidget(self.pages_container, 1)
         self.main_layout.addWidget(right_container, 1)
 
         self.btn_form.clicked.connect(lambda: self.switch_page(0))
-        self.btn_history.clicked.connect(lambda: self.switch_page(1))
-        self.btn_monitor.clicked.connect(lambda: self.switch_page(2))
+        self.btn_monitor.clicked.connect(lambda: self.switch_page(1))
+        self.btn_history.clicked.connect(lambda: self.switch_page(2))
         
         self.switch_page(0)
 
@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         self.animation.start()
 
     def switch_page(self, index):
-        if index == 2 and not self.is_subject_ready:
+        if index == 1 and not self.is_subject_ready:
             QMessageBox.warning(self, "Akses Terkunci", "Instrumen monitoring steril. Sesi hanya dapat diakses via registrasi pasien baru atau basis data historis.")
             self.btn_form.setChecked(True)
             return
@@ -247,20 +247,20 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self.buttons):
             btn.setChecked(i == index)
 
-        if index == 1:
+        if index == 2:
             self.page_history.load_patient_data()
 
     def handle_form_submitted(self, data):
         self.is_subject_ready = True       
         self.btn_monitor.setEnabled(True)  
         self.page_monitor.start_test(data)
-        self.switch_page(2)
+        self.switch_page(1)
 
     def handle_history_patient_selected(self, data):
         self.is_subject_ready = True
         self.btn_monitor.setEnabled(True)
         self.page_monitor.start_test(data)
-        self.switch_page(2)
+        self.switch_page(1)
 
     def closeEvent(self, event):
         self.page_monitor.stop_stream()

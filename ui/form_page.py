@@ -184,16 +184,27 @@ class FormPage(QWidget):
         email = self.entry_email.text().strip()
         jk = "Laki-laki" if self.laki_radio.isChecked() else "Perempuan" if self.perempuan_radio.isChecked() else ""
 
+        # 1. Validasi Komponen Utama Wajib Isi
         if not (nama and umur_str and jk):
             QMessageBox.warning(self, "Validasi Gagal", "Komponen utama (Nama, Umur, Jenis Kelamin) wajib diisi medis!")
             return
 
+        # 2. Validasi Umur Harus Angka
         try:
             umur = int(umur_str)
         except ValueError:
             QMessageBox.critical(self, "Validasi Gagal", "Karakter umur harus berupa bilangan angka numerik!")
             return
 
+        # 3. BARU: Validasi Format Email Pasien (Hanya dicek jika email diinputkan oleh user)
+        if email:
+            # Memastikan ada karakter '@', bukan di awal string, dan bukan di ujung string
+            if "@" not in email or email.startswith("@") or email.endswith("@"):
+                QMessageBox.warning(self, "Format Email Salah", 
+                                    "Format email tidak valid! Pastikan menyertakan karakter '@' dengan benar (contoh: pasien@email.com).")
+                return
+
+        # Proses penyimpanan ke SQLite database (Sama seperti sebelumnya)
         sub_id = self.db_manager.add_subject(nama, umur, alamat, email, jk)
         if sub_id:
             QMessageBox.information(self, "Sukses", "Data subjek berhasil disimpan")

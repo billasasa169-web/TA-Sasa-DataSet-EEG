@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.signal import welch
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSplitter
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSplitter, QApplication
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -13,12 +13,12 @@ class MonitorPage(QWidget):
         self.ble_worker = ble_worker
         self.current_subjek = None
         
-        # Buffer Data Sinkronisasi Sinyal
-        self.fs = 500  # Frekuensi Sampling ESP32
-        self.max_points = self.fs * 3  # Tampilkan jendela waktu 3 detik berjalan
-        self.raw_data = [2048] * self.max_points
+        # SINKRONISASI 10 DETIK: 250Hz * 10 Detik = 2500 titik data berjalan berjalan
+        self.fs = 250  
+        self.max_points = self.fs * 10  
         
-        # Counter internal untuk membatasi frekuensi kalkulasi matematika berat (FFT/Welch)
+        # Buffer awal berbasis skala tegangan Volt murni
+        self.raw_data = [0.0] * self.max_points
         self.packet_counter = 0
         
         self.init_ui()
@@ -28,56 +28,51 @@ class MonitorPage(QWidget):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
         
-        # Bar Atas Informasi Pasien Aktif
         self.patient_bar = QLabel("Subjek Aktif: Belum Ada Pengujian")
         self.patient_bar.setStyleSheet("background-color: #1e293b; color: white; padding: 10px; font-weight: bold; border-radius: 6px; font-size: 10.5pt;")
         main_layout.addWidget(self.patient_bar)
         
-        # ================= STRUKTUR LAYOUT UTAMA: 4 KUADRAN GRID SPLITTER =================
         splitter_vertikal_induk = QSplitter(Qt.Vertical)
         splitter_baris_atas = QSplitter(Qt.Horizontal)
         splitter_baris_bawah = QSplitter(Qt.Horizontal)
 
-        # ---------------- 1. KIRI ATAS: TIME SERIES PANEL ----------------
+        # 1. TIME SERIES PANEL (10 DETIK SLIDING WINDOW SKALA VOLT)
         frame_time = QFrame()
         frame_time.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_time = QVBoxLayout(frame_time)
-        
         self.fig_time = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_time = FigureCanvas(self.fig_time)
         self.ax_time = self.fig_time.add_subplot(111)
-        self.ax_time.set_ylim(0, 4095)
-        self.ax_time.set_title("Time Series (Amplitudo ADC)", fontweight="bold", color="#1e293b", fontsize=10)
+        
+        self.ax_time.set_ylim(-1.65, 1.65)
+        self.ax_time.set_xlim(0, self.max_points)
+        self.ax_time.set_title("Time Series (Tegangan Sinyal - Volt)", fontweight="bold", color="#1e293b", fontsize=10)
         self.ax_time.grid(True, alpha=0.3)
         self.line_time, = self.ax_time.plot(self.raw_data, color='#0284c7', lw=1.2)
         self.fig_time.tight_layout()
-        
         layout_time.addWidget(self.canvas_time)
         splitter_baris_atas.addWidget(frame_time)
 
-        # ---------------- 2. KANAN ATAS: FFT SPECTRUM PANEL ----------------
+        # 2. FFT SPECTRUM PANEL
         frame_fft = QFrame()
         frame_fft.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_fft = QVBoxLayout(frame_fft)
-        
         self.fig_fft = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_fft = FigureCanvas(self.fig_fft)
         self.ax_fft = self.fig_fft.add_subplot(111)
         self.ax_fft.set_xlim(0, 60)  
-        self.ax_fft.set_ylim(0, 150)
+        self.ax_fft.set_ylim(0, 50)
         self.ax_fft.set_title("FFT Power Spectrum (Domain Frekuensi)", fontweight="bold", color="#1e293b", fontsize=10)
         self.ax_fft.grid(True, alpha=0.3)
         self.line_fft, = self.ax_fft.plot([], [], color='#e67e22', lw=1.2)
         self.fig_fft.tight_layout()
-        
         layout_fft.addWidget(self.canvas_fft)
         splitter_baris_atas.addWidget(frame_fft)
 
-        # ---------------- 3. KIRI BAWAH: WELCH BAR CHART PANEL ----------------
+        # 3. WELCH BAR CHART PANEL
         frame_bar = QFrame()
         frame_bar.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_bar = QVBoxLayout(frame_bar)
-        
         self.fig_bar = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_bar = FigureCanvas(self.fig_bar)
         self.ax_bar = self.fig_bar.add_subplot(111)
@@ -88,31 +83,27 @@ class MonitorPage(QWidget):
         self.ax_bar.set_ylim(0, 100)
         self.ax_bar.grid(True, axis='y', alpha=0.2)
         self.fig_bar.tight_layout()
-        
         layout_bar.addWidget(self.canvas_bar)
         splitter_baris_bawah.addWidget(frame_bar)
 
-        # ---------------- 4. KANAN BAWAH: REAL-TIME PIE CHART PANEL ----------------
+        # 4. REAL-TIME PIE CHART PANEL
         frame_pie = QFrame()
         frame_pie.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_pie = QVBoxLayout(frame_pie)
-        
         self.fig_pie = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_pie = FigureCanvas(self.fig_pie)
         self.ax_pie = self.fig_pie.add_subplot(111)
         self.ax_pie.set_title("Distribusi Gelombang Otak", fontweight="bold", color="#1e293b", fontsize=10)
+        self.ax_pie.axis('off')  
         self.fig_pie.tight_layout()
-        
         layout_pie.addWidget(self.canvas_pie)
         splitter_baris_bawah.addWidget(frame_pie)
 
-        # Gabungkan kompartemen splitter
         splitter_vertikal_induk.addWidget(splitter_baris_atas)
         splitter_vertikal_induk.addWidget(splitter_baris_bawah)
         splitter_vertikal_induk.setSizes([400, 400])
         splitter_baris_atas.setSizes([500, 500])
         splitter_baris_bawah.setSizes([500, 500])
-        
         main_layout.addWidget(splitter_vertikal_induk, 1)
         
         # ================= BOTTOM CONTROLS =================
@@ -120,21 +111,21 @@ class MonitorPage(QWidget):
         self.status_label = QLabel("   Status BLE: Terputus")
         self.status_label.setStyleSheet("font-weight: bold; color: #64748b; font-size:11pt;")
         
-        self.start_btn = QPushButton("🔌 Buka Koneksi & Start Stream")
-        self.start_btn.setCursor(Qt.PointingHandCursor)
-        self.start_btn.clicked.connect(self.start_stream)
-        self.start_btn.setStyleSheet("background-color: #0284c7; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
+        self.connect_btn = QPushButton("🔌 Hubungkan Alat & Start Stream")
+        self.connect_btn.setCursor(Qt.PointingHandCursor)
+        self.connect_btn.clicked.connect(self.connect_hardware)
+        self.connect_btn.setStyleSheet("background-color: #16a34a; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
         
-        self.stop_btn = QPushButton("🛑 Stop Stream")
-        self.stop_btn.setCursor(Qt.PointingHandCursor)
-        self.stop_btn.clicked.connect(self.stop_stream)
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("background-color: #ef4444; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
+        self.disconnect_btn = QPushButton("🛑 Putus Koneksi")
+        self.disconnect_btn.setCursor(Qt.PointingHandCursor)
+        self.disconnect_btn.clicked.connect(self.disconnect_hardware)
+        self.disconnect_btn.setEnabled(False)
+        self.disconnect_btn.setStyleSheet("background-color: #dc2626; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
         
         ctrl_layout.addWidget(self.status_label)
         ctrl_layout.addStretch()
-        ctrl_layout.addWidget(self.start_btn)
-        ctrl_layout.addWidget(self.stop_btn)
+        ctrl_layout.addWidget(self.connect_btn)
+        ctrl_layout.addWidget(self.disconnect_btn)
         main_layout.addLayout(ctrl_layout)
 
     def start_test(self, subjek_data):
@@ -142,49 +133,64 @@ class MonitorPage(QWidget):
         info_teks = f"   Subjek Aktif: {subjek_data['nama'].upper()} ({subjek_data['jenis_kelamin']}, {subjek_data['umur']} Tahun) | ID: #{subjek_data['id']}"
         self.patient_bar.setText(info_teks)
         
-    def start_stream(self):
-        self.ble_worker.data_received.connect(self.process_new_data)
-        self.ble_worker.status_changed.connect(self.status_label.setText)
-        self.ble_worker.start()
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+    def connect_hardware(self):
+        """Menghubungkan langsung ke jembatan data asinkron"""
+        self.connect_btn.setEnabled(False)
+        try:
+            self.ble_worker.data_received.disconnect()
+            self.ble_worker.status_changed.disconnect()
+        except TypeError:
+            pass
 
-    def stop_stream(self):
+        self.ble_worker.data_received.connect(self.process_new_data)
+        self.ble_worker.status_changed.connect(self.handle_status_changed)
+        self.ble_worker.start()
+
+    def disconnect_hardware(self):
+        """Mematikan jalur sinyal data"""
         if self.ble_worker:
             self.ble_worker.stop()
             self.ble_worker.wait()
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.status_label.setText("Status BLE: Terputus")
+        self.connect_btn.setEnabled(True)
+        self.disconnect_btn.setEnabled(False)
+        self.status_label.setText("   Status BLE: Terputus")
+
+    def handle_status_changed(self, text):
+        self.status_label.setText(text)
+        if "Terputus" in text or "Tidak Ditemukan" in text or "Eror" in text:
+            self.connect_btn.setEnabled(True)
+            self.disconnect_btn.setEnabled(False)
+        elif "Terhubung" in text:
+            self.connect_btn.setEnabled(False)
+            self.disconnect_btn.setEnabled(True)
 
     def process_new_data(self, val):
-        """Memproses data masuk 500Hz secara realtime tanpa mematikan UI thread"""
-        self.raw_data.pop(0)
-        self.raw_data.append(val)
+        """Mekanisme sliding window 10 detik skala voltase murni"""
+        voltage = ((val - 2048.0) / 4095.0) * 3.3
         
-        # Increment counter paket data masuk
+        self.raw_data.pop(0)
+        self.raw_data.append(voltage)
         self.packet_counter += 1
         
-        # 1. Update Grafik Utama Time Series (Kiri Atas) - Berjalan Real-time di setiap titik data masuk
         self.line_time.set_ydata(self.raw_data)
         self.canvas_time.draw_idle()
         
-        # PERBAIKAN: Gunakan self.packet_counter untuk pembatasan beban komputasi FFT/Welch (Per 25 data paket)
+        if self.packet_counter % 5 == 0:
+            QApplication.processEvents()
+        
         if self.packet_counter % 25 == 0:
-            signal_np = np.array(self.raw_data) - 2048.0 
+            signal_np = np.array(self.raw_data)
             N = len(signal_np)
             
-            # 2. Update FFT Power Spectrum (Kanan Atas)
             fft_vals = np.abs(np.fft.fft(signal_np)) / N
             fft_freqs = np.fft.fftfreq(N, 1/self.fs)
             idx_pos = (fft_freqs >= 0) & (fft_freqs <= 60)
             
             self.line_fft.set_data(fft_freqs[idx_pos], fft_vals[idx_pos])
             if len(fft_vals[idx_pos]) > 0:
-                self.ax_fft.set_ylim(0, max(np.max(fft_vals[idx_pos]) * 1.2, 20))
+                self.ax_fft.set_ylim(0, max(np.max(fft_vals[idx_pos]) * 1.2, 0.1))
             self.canvas_fft.draw_idle()
             
-            # 3. Komputasi Metode Welch untuk Klasifikasi Pita Gelombang Otak
             try:
                 f, psd = welch(signal_np, fs=self.fs, nperseg=min(len(signal_np), self.fs))
                 total_power = np.sum(psd)
@@ -199,14 +205,13 @@ class MonitorPage(QWidget):
                         power_band = np.sum(psd[idx])
                         percentages.append((power_band / total_power) * 100)
                     
-                    # 3.1. Update Welch Bar Chart (Kiri Bawah)
                     for rect, val_pct in zip(self.bar_rects, percentages):
                         rect.set_height(val_pct)
                     self.canvas_bar.draw_idle()
                     
-                    # 3.2. Update Visualisasi Pie Chart (Kanan Bawah) secara Real-time
                     self.ax_pie.clear() 
-                    self.ax_pie.set_title("Distribusi Gelombang Otak (Pie)", fontweight="bold", color="#1e293b", fontsize=10)
+                    self.ax_pie.set_title("Distribusi Gelombang Otak", fontweight="bold", color="#1e293b", fontsize=10)
+                    self.ax_pie.axis('off') 
                     
                     self.ax_pie.pie(
                         percentages, 
@@ -217,6 +222,5 @@ class MonitorPage(QWidget):
                         textprops={'fontsize': 8, 'weight': 'bold', 'color': '#334155'}
                     )
                     self.canvas_pie.draw_idle()
-                    
             except Exception:
                 pass

@@ -5,7 +5,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from bleak import BleakClient, BleakScanner
 
 class BLEWorker(QThread):
-    # Signal untuk berkomunikasi dengan UI Thread
+    # Sinyal komunikasi ke UI thread (jika dibutuhkan nantinya)
     data_received = pyqtSignal(int)
     status_changed = pyqtSignal(str)
 
@@ -15,71 +15,99 @@ class BLEWorker(QThread):
         self.loop = None
         self.client = None
         
-        # UUID Konfigurasi Sinkron Sesuai Firmware ESP32-S3 Anda
-        self.TARGET_NAME = "ESP32S3-ADC"
+        # MAC Address Target ESP32-S3 Anda
+        self.TARGET_MAC = "B4:3A:45:AD:44:5D"
+        
+        # UUID Karakteristik TX (Sesuai sketsa Arduino Anda)
         self.SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
-        self.RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e" # Menulis Command ke ESP32
-        self.TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e" # Menerima Notification Stream
+        self.TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e" 
 
     def run(self):
         """Titik masuk thread utama QThread"""
         self.running = True
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.main_ble_task())
+        asyncio.ensure_future(self.main_ble_task(), loop=self.loop)
+        self.loop.run_forever()
 
     async def main_ble_task(self):
         self.status_changed.emit("Status BLE: Mencari Perangkat...")
+        print("\n================ [CONSOLE.LOG START] ================")
+        print(f"Membuka radar scanning untuk mengunci MAC: {self.TARGET_MAC}")
         try:
-            # 1. Scanning Perangkat Terget
-            device = await BleakScanner.find_device_by_name(self.TARGET_NAME, timeout=5.0)
+            device = None
+            devices = await BleakScanner.discover(timeout=4.0)
+            
+            for d in devices:
+                if d.address.upper() == self.TARGET_MAC.upper():
+                    print(f"🎯 TARGET ESP32-S3 BERHASIL DIKUNCI DI RADAR UDARA!")
+                    device = d
+                    break
+            
             if not device:
+                print("❌ GAGAL: Target MAC tidak ditemukan di udara. Pastikan ESP32 menyala.")
                 self.status_changed.emit("Status BLE: Perangkat Tidak Ditemukan")
+                self.stop_loop()
                 return
 
             self.status_changed.emit("Status BLE: Menyambungkan...")
             
-            # 2. Inisialisasi Koneksi Client
-            async with BleakClient(device) as client:
+            async with BleakClient(device, disconnected_callback=self.handle_disconnect) as client:
                 self.client = client
                 self.status_changed.emit("Status BLE: Terhubung")
+                print("⚡ [KONEKSI SUKSES] Berhasil Terkoneksi dengan ESP32-S3!")
+                print("▶ Menunggu aliran notifikasi paket biner masuk...\n")
                 
-                # Mengaktifkan listen notification stream data biner dari ESP32
+                # Buka katup aliran notifikasi data biner 14 Byte dari ESP32
                 await client.start_notify(self.TX_UUID, self.notification_handler)
                 
-                # Mengirimkan Handshake awal agar ESP32 tahu ia harus mengalirkan data ke jalur BLE
-                await client.write_gatt_char(self.RX_UUID, b"MODE BLE\n")
-                await asyncio.sleep(0.1)
-                await client.write_gatt_char(self.RX_UUID, b"START\n")
-                
-                # Menjaga Loop Asinkron Tetap Hidup Selama Stream Berjalan
+                # Menjaga loop asinkron agar tetap hidup selama menangkap stream data
                 while self.running:
                     await asyncio.sleep(0.1)
                 
-                # 3. Proses Stop Stream Secara Bersih saat Keluar Sesi
-                await client.write_gatt_char(self.RX_UUID, b"STOP\n")
                 await client.stop_notify(self.TX_UUID)
                 
         except Exception as e:
+            print(f"❌ [ERROR UTAMA BLE]: {e}")
             self.status_changed.emit(f"Status BLE: Eror Koneksi")
         finally:
-            self.status_changed.emit("Status BLE: Terputus")
+            self.stop_loop()
 
     def notification_handler(self, sender, data):
-        """Membongkar Paket Biner Mentah 6 Byte dari Jalur Komunikasi ESP32"""
-        # Validasi Struktur Paket: [C7][7C][CTR][HI][LO][01]
-        if len(data) == 6 and data[0] == 0xC7 and data[1] == 0x7C and data[5] == 0x01:
-            high_byte = data[3]
-            low_byte = data[4]
+        """
+        MEKANISME PEMECAHAN BINER: Mengurai paket batch 14 Byte menjadi 5 data desimal ADC
+        dan mencetaknya secara real-time ke terminal konsol.
+        """
+        # Validasi struktur paket batch: [0xC7][0x7C][Counter] ... [0x01]
+        if len(data) == 14 and data[0] == 0xC7 and data[1] == 0x7C and data[13] == 0x01:
+            packet_counter = data[2]
+            print(f"📦 [RAW BATCH ARRIVED] Counter Paket: {packet_counter} | Hex Array: {data.hex().upper()}")
             
-            # Rekonstruksi Bitwise untuk Membentuk Nilai Integer ADC 12-Bit Asli
-            adc_value = (high_byte << 8) | low_byte
-            
-            # Pancarkan Nilai Desimal ke UI Terkait
-            self.data_received.emit(adc_value)
+            # Memecah 14 Byte data biner menjadi 5 sampel data ADC 12-bit murni
+            for i in range(5):
+                high_byte = data[3 + i * 2]
+                low_byte = data[3 + i * 2 + 1]
+                
+                # Operasi bitwise rekonstruksi data integer asli (0-4095)
+                adc_value = (high_byte << 8) | low_byte
+                
+                # Cetak hasil pemecahan biner murni secara real-time ke terminal
+                print(f"   └── Sampel ke-{i+1}: {adc_value} (ADC Count)")
+                
+                # Pancarkan ke UI Thread untuk kebutuhan visualisasi grafik
+                self.data_received.emit(adc_value)
+        else:
+            print(f"⚠️ Paket tidak lolos validasi struktur, panjang: {len(data)} byte.")
 
-    def stop(self):
-        """Dipanggil dari UI Thread untuk Menghentikan Proses Transmisi Data"""
+    def handle_disconnect(self, client):
+        print("⚠️ Perangkat terputus secara mendadak di level OS Windows!")
+        self.status_changed.emit("Status BLE: Terputus")
+        self.stop_loop()
+
+    def stop_loop(self):
         self.running = False
-        if self.loop:
+        if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self.loop.stop)
+            
+    def stop(self):
+        self.stop_loop()

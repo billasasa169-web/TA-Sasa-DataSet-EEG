@@ -4,20 +4,22 @@ import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
                              QFrame, QPushButton, QStackedWidget, QLabel, QMessageBox)
 from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QSize
-from PyQt5.QtGui import QIcon # Diperlukan untuk merender file gambar ikon
+from PyQt5.QtGui import QIcon
 from ui.form_page import FormPage
 from ui.monitor_page import MonitorPage
 from ui.history_page import HistoryPage
+from core.ble_worker import BLEWorker # Menggunakan BLEWorker asinkron mandiri
 
 class MainWindow(QMainWindow):
-    def __init__(self, db_manager, ble_worker):
+    def __init__(self, db_manager, ble_worker_placeholder=None):
         super().__init__()
         self.db_manager = db_manager
-        self.ble_worker = ble_worker
+        
+        # Inisialisasi Instance BLEWorker Mandiri untuk Background Thread
+        self.ble_worker = BLEWorker()
         self.is_subject_ready = False 
         
-        # 1. Konfigurasi Path Folder Assets secara Absolut (Root Project)
-        # __file__ ada di root/ui/main_window.py, mundur 1 langkah ke root proyek
+        # Konfigurasi Path Folder Assets secara Absolut (Root Project)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.assets_dir = os.path.join(base_dir, "assets")
         
@@ -50,8 +52,6 @@ class MainWindow(QMainWindow):
         
         # Header Brand & Tombol Close
         brand_layout = QHBoxLayout()
-        
-        # Label Logo Brand Utama (Jika Anda punya file logo, bisa dimasukkan ke sini)
         self.brand_title = QLabel("EEG APP SYSTEM")
         
         self.btn_close_sidebar = QPushButton("◀")
@@ -61,14 +61,12 @@ class MainWindow(QMainWindow):
         brand_layout.addWidget(self.brand_title)
         brand_layout.addWidget(self.btn_close_sidebar)
         self.sidebar_layout.addLayout(brand_layout)
-        
         self.sidebar_layout.addSpacing(25)
 
-        # Navigasi Button Menu - Emoticon teks dihapus, diganti spasi penampung QIcon
+        # Navigasi Button Menu dengan Ikon
         self.btn_form = QPushButton("   Data Subjek")
         self.btn_monitor = QPushButton("   Rekaman Baru")
         self.btn_history = QPushButton("   Riwayat Rekaman")
-        
 
         # Load file gambar dari folder assets ke objek QIcon
         self.icon_form = QIcon(os.path.join(self.assets_dir, "input.png"))
@@ -77,21 +75,21 @@ class MainWindow(QMainWindow):
         
         # Tempelkan QIcon ke masing-masing tombol fisik
         self.btn_form.setIcon(self.icon_form)
-        self.btn_history.setIcon(self.icon_history)
         self.btn_monitor.setIcon(self.icon_monitor)
+        self.btn_history.setIcon(self.icon_history)
 
+        # Menata Urutan Indeks Menu Array Tombol: 0 = Form, 1 = Monitor, 2 = History
         self.buttons = [self.btn_form, self.btn_monitor, self.btn_history]
         for btn in self.buttons:
             btn.setCheckable(True)
             self.sidebar_layout.addWidget(btn)
             
-        self.btn_monitor.setEnabled(False)
+        self.btn_monitor.setEnabled(False) # Mengunci tombol monitor sebelum pasien siap
         self.sidebar_layout.addStretch()
         
         # Footer Teks
         self.footer_label = QLabel("v0.0.1 Bachelor Thesis")
         self.sidebar_layout.addWidget(self.footer_label)
-        
         self.main_layout.addWidget(self.sidebar)
 
         # ================= AREA KONTEN UTAMA KANAN =================
@@ -116,14 +114,13 @@ class MainWindow(QMainWindow):
         top_bar_layout.addWidget(self.btn_hamburger)
         top_bar_layout.addWidget(self.session_title)
         top_bar_layout.addStretch()
-        
         right_layout.addWidget(self.top_bar)
 
-        # AREA STACKED CONTAINER HALAMAN
+        # ================= AREA STACKED CONTAINER HALAMAN =================
         self.pages_container = QStackedWidget()
         
         self.page_form = FormPage(self.db_manager, self.handle_form_submitted)
-        self.page_monitor = MonitorPage(self.ble_worker)      
+        self.page_monitor = MonitorPage(self.ble_worker)
         self.page_history = HistoryPage(self.db_manager, self.handle_history_patient_selected) 
 
         self.pages_container.addWidget(self.page_form)        # Indeks 0
@@ -133,6 +130,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.pages_container, 1)
         self.main_layout.addWidget(right_container, 1)
 
+        # Sinkronisasi Event Klik dengan Nomor Indeks Halaman yang Tepat
         self.btn_form.clicked.connect(lambda: self.switch_page(0))
         self.btn_monitor.clicked.connect(lambda: self.switch_page(1))
         self.btn_history.clicked.connect(lambda: self.switch_page(2))
@@ -158,7 +156,7 @@ class MainWindow(QMainWindow):
             top_bar_height = 80
             hamburger_size = 46
             close_btn_size = 38
-            icon_size = QSize(32, 32) # Ikon membesar di layar resolusi tinggi
+            icon_size = QSize(32, 32)
             
             self.current_sidebar_target = self.sidebar_large_width
             if self.sidebar.width() > 0:
@@ -171,7 +169,7 @@ class MainWindow(QMainWindow):
             top_bar_height = 60
             hamburger_size = 36
             close_btn_size = 32
-            icon_size = QSize(24, 24) # Ikon berukuran standar di resolusi normal
+            icon_size = QSize(24, 24)
             
             self.current_sidebar_target = self.sidebar_normal_width
             if self.sidebar.width() > 0:
@@ -182,7 +180,7 @@ class MainWindow(QMainWindow):
         self.btn_hamburger.setFixedSize(hamburger_size, hamburger_size)
         self.btn_close_sidebar.setFixedSize(close_btn_size, close_btn_size)
 
-        # Update Style Medis QSS Kurung Kurawal Ganda
+        # Update Style Medis QSS Kurung Kurawal Ganda {{ }}
         self.setStyleSheet(f"QWidget {{ font-family: 'Segoe UI', Arial; font-size: {font_base}; color: #2c3e50; }} QMainWindow {{ background-color: #f8f9fa; }}")
         self.brand_title.setStyleSheet(f"color: #f8fafc; font-size: {font_title}; font-weight: 800; letter-spacing: 1px;")
         self.session_title.setStyleSheet(f"font-size: {font_btn}; font-weight: 700; color: #475569; margin-left: 10px;")
@@ -220,6 +218,7 @@ class MainWindow(QMainWindow):
         self.footer_label.setStyleSheet(f"color: #475569; font-size: calc({font_base} - 2pt); font-weight: 500; padding-left: 16px;")
 
     def toggle_sidebar(self):
+        """Mekanisme Animasi Buka-Tutup Sidebar yang Menyesuaikan Target Ukuran Dinamis"""
         current_width = self.sidebar.width()
         if current_width > 0:
             target_width = 0
@@ -238,6 +237,8 @@ class MainWindow(QMainWindow):
         self.animation.start()
 
     def switch_page(self, index):
+        """Fungsi transisi halaman dengan proteksi akses sterilisasi data monitor"""
+        # Proteksi Khusus: Cegah masuk monitor (Indeks 1) jika subjek belum siap
         if index == 1 and not self.is_subject_ready:
             QMessageBox.warning(self, "Akses Terkunci", "Instrumen monitoring steril. Sesi hanya dapat diakses via registrasi pasien baru atau basis data historis.")
             self.btn_form.setChecked(True)
@@ -247,20 +248,23 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self.buttons):
             btn.setChecked(i == index)
 
+        # Jika membuka halaman riwayat rekaman (Indeks 2), lakukan refresh database otomatis
         if index == 2:
             self.page_history.load_patient_data()
 
     def handle_form_submitted(self, data):
+        """Dipanggil otomatis saat form baru sukses disubmit"""
         self.is_subject_ready = True       
         self.btn_monitor.setEnabled(True)  
         self.page_monitor.start_test(data)
-        self.switch_page(1)
+        self.switch_page(1) # Otomatis melompat ke Ruang Live Monitor (Indeks 1)
 
     def handle_history_patient_selected(self, data):
+        """Dipanggil otomatis saat mendeteksi pasien lama dipilih dari tabel riwayat"""
         self.is_subject_ready = True
         self.btn_monitor.setEnabled(True)
         self.page_monitor.start_test(data)
-        self.switch_page(1)
+        self.switch_page(1) # Otomatis melompat ke Ruang Live Monitor (Indeks 1)
 
     def closeEvent(self, event):
         self.page_monitor.stop_stream()

@@ -18,6 +18,9 @@ class MonitorPage(QWidget):
         self.max_points = self.fs * 3  # Tampilkan jendela waktu 3 detik berjalan
         self.raw_data = [2048] * self.max_points
         
+        # Counter internal untuk membatasi frekuensi kalkulasi matematika berat (FFT/Welch)
+        self.packet_counter = 0
+        
         self.init_ui()
         
     def init_ui(self):
@@ -27,16 +30,12 @@ class MonitorPage(QWidget):
         
         # Bar Atas Informasi Pasien Aktif
         self.patient_bar = QLabel("Subjek Aktif: Belum Ada Pengujian")
-        self.patient_bar.setStyleSheet("background-color: #1e293b; color: white; padding: 10px; font-weight: bold; border-radius: 6px; font-size: 8pt;")
+        self.patient_bar.setStyleSheet("background-color: #1e293b; color: white; padding: 10px; font-weight: bold; border-radius: 6px; font-size: 10.5pt;")
         main_layout.addWidget(self.patient_bar)
         
         # ================= STRUKTUR LAYOUT UTAMA: 4 KUADRAN GRID SPLITTER =================
         splitter_vertikal_induk = QSplitter(Qt.Vertical)
-        
-        # BARIS ATAS: Menampung (Kiri Atas & Kanan Atas)
         splitter_baris_atas = QSplitter(Qt.Horizontal)
-        
-        # BARIS BAWAH: Menampung (Kiri Bawah & Kanan Bawah)
         splitter_baris_bawah = QSplitter(Qt.Horizontal)
 
         # ---------------- 1. KIRI ATAS: TIME SERIES PANEL ----------------
@@ -101,21 +100,15 @@ class MonitorPage(QWidget):
         self.fig_pie = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_pie = FigureCanvas(self.fig_pie)
         self.ax_pie = self.fig_pie.add_subplot(111)
-        self.ax_pie.set_title("Distribusi Gelombang Otak ", fontweight="bold", color="#1e293b", fontsize=10)
-        
-        # Inisialisasi Pie Chart kosong fiktif di awal agar tidak error sewaktu render data pertama
-        self.pie_wedges = []
-        self.pie_texts = []
+        self.ax_pie.set_title("Distribusi Gelombang Otak", fontweight="bold", color="#1e293b", fontsize=10)
         self.fig_pie.tight_layout()
         
         layout_pie.addWidget(self.canvas_pie)
         splitter_baris_bawah.addWidget(frame_pie)
 
-        # Gabungkan baris atas dan baris bawah ke dalam splitter induk vertikal
+        # Gabungkan kompartemen splitter
         splitter_vertikal_induk.addWidget(splitter_baris_atas)
         splitter_vertikal_induk.addWidget(splitter_baris_bawah)
-        
-        # Set proporsi seimbang 50:50 antara atas dan bawah
         splitter_vertikal_induk.setSizes([400, 400])
         splitter_baris_atas.setSizes([500, 500])
         splitter_baris_bawah.setSizes([500, 500])
@@ -146,9 +139,7 @@ class MonitorPage(QWidget):
 
     def start_test(self, subjek_data):
         self.current_subjek = subjek_data
-        info_teks = f"   Subjek Aktif: {subjek_data['nama'].upper()} " \
-                    f"({subjek_data['jenis_kelamin']}, {subjek_data['umur']} Tahun) " \
-                    f"| ID: #{subjek_data['id']}"
+        info_teks = f"   Subjek Aktif: {subjek_data['nama'].upper()} ({subjek_data['jenis_kelamin']}, {subjek_data['umur']} Tahun) | ID: #{subjek_data['id']}"
         self.patient_bar.setText(info_teks)
         
     def start_stream(self):
@@ -171,12 +162,15 @@ class MonitorPage(QWidget):
         self.raw_data.pop(0)
         self.raw_data.append(val)
         
-        # 1. Update Time Series (Kiri Atas)
+        # Increment counter paket data masuk
+        self.packet_counter += 1
+        
+        # 1. Update Grafik Utama Time Series (Kiri Atas) - Berjalan Real-time di setiap titik data masuk
         self.line_time.set_ydata(self.raw_data)
         self.canvas_time.draw_idle()
         
-        # Mengurangi beban komputasi (Diproses berkala per 25 paket data)
-        if val % 25 == 0:
+        # PERBAIKAN: Gunakan self.packet_counter untuk pembatasan beban komputasi FFT/Welch (Per 25 data paket)
+        if self.packet_counter % 25 == 0:
             signal_np = np.array(self.raw_data) - 2048.0 
             N = len(signal_np)
             
@@ -211,10 +205,9 @@ class MonitorPage(QWidget):
                     self.canvas_bar.draw_idle()
                     
                     # 3.2. Update Visualisasi Pie Chart (Kanan Bawah) secara Real-time
-                    self.ax_pie.clear() # Bersihkan posisi patch lama
+                    self.ax_pie.clear() 
                     self.ax_pie.set_title("Distribusi Gelombang Otak (Pie)", fontweight="bold", color="#1e293b", fontsize=10)
                     
-                    # Redraw Pie dengan persentase terbaru
                     self.ax_pie.pie(
                         percentages, 
                         labels=self.bands_label, 

@@ -31,12 +31,35 @@ class MonitorPage(QWidget):
         self.patient_bar = QLabel("Subjek Aktif: Belum Ada Pengujian")
         self.patient_bar.setStyleSheet("background-color: #1e293b; color: white; padding: 10px; font-weight: bold; border-radius: 6px; font-size: 10.5pt;")
         main_layout.addWidget(self.patient_bar)
+
+        # ================= BOTTOM CONTROLS =================
+        ctrl_layout = QHBoxLayout()
+        self.status_label = QLabel("   Status BLE: Terputus")
+        self.status_label.setStyleSheet("font-weight: bold; color: #64748b; font-size:11pt;")
+        
+        self.connect_btn = QPushButton("🔌 Sambungkan Koneksi")
+        self.connect_btn.setCursor(Qt.PointingHandCursor)
+        self.connect_btn.clicked.connect(self.connect_hardware)
+        self.connect_btn.setStyleSheet("background-color: #16a34a; color: white; font-weight:bold; padding:8px 20px; border:none; border-radius:6px;")
+        
+        self.disconnect_btn = QPushButton("🛑 Putus Koneksi")
+        self.disconnect_btn.setCursor(Qt.PointingHandCursor)
+        self.disconnect_btn.clicked.connect(self.disconnect_hardware)
+        self.disconnect_btn.setEnabled(False)
+        self.disconnect_btn.setStyleSheet("background-color: #dc2626; color: white; font-weight:bold; padding:8px 20px; border:none; border-radius:6px;")
+        
+        ctrl_layout.addWidget(self.status_label)
+        ctrl_layout.addStretch()
+        ctrl_layout.addWidget(self.connect_btn)
+        ctrl_layout.addWidget(self.disconnect_btn)
+        main_layout.addLayout(ctrl_layout)
+
         
         splitter_vertikal_induk = QSplitter(Qt.Vertical)
         splitter_baris_atas = QSplitter(Qt.Horizontal)
         splitter_baris_bawah = QSplitter(Qt.Horizontal)
 
-        # 1. TIME SERIES PANEL (10 DETIK SLIDING WINDOW SKALA VOLT)
+        # 1. TIME SERIES PANEL (10 DETIK SLIDING WINDOW)
         frame_time = QFrame()
         frame_time.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_time = QVBoxLayout(frame_time)
@@ -46,7 +69,18 @@ class MonitorPage(QWidget):
         
         self.ax_time.set_ylim(-1.65, 1.65)
         self.ax_time.set_xlim(0, self.max_points)
-        self.ax_time.set_title("Time Series (Tegangan Sinyal - Volt)", fontweight="bold", color="#1e293b", fontsize=10)
+
+        posisi_ticks = np.linspace(0, self.max_points, 11)
+        label_ticks = ['-10', '-9', '-8', '-7', '-6', '-5', '-4', '-3', '-2', '-1', '0']
+        
+        self.ax_time.set_xticks(posisi_ticks)
+        self.ax_time.set_xticklabels(label_ticks)
+        
+        # SESUAI GAMBAR 1: Mengubah judul dan memberikan label pada sumbu x & y
+        self.ax_time.set_title("Time Series", fontweight="bold", color="#000000", fontsize=12)
+        self.ax_time.set_ylabel("Amplitudo (µV)", color="#000000", fontsize=11, fontweight="bold")
+        self.ax_time.set_xlabel("time (s)", color="#000000", fontsize=11, fontweight="bold")
+        
         self.ax_time.grid(True, alpha=0.3)
         self.line_time, = self.ax_time.plot(self.raw_data, color='#0284c7', lw=1.2)
         self.fig_time.tight_layout()
@@ -62,7 +96,12 @@ class MonitorPage(QWidget):
         self.ax_fft = self.fig_fft.add_subplot(111)
         self.ax_fft.set_xlim(0, 60)  
         self.ax_fft.set_ylim(0, 50)
-        self.ax_fft.set_title("FFT Power Spectrum (Domain Frekuensi)", fontweight="bold", color="#1e293b", fontsize=10)
+        
+        # SESUAI GAMBAR 2: Mengubah judul dan pelabelan sumbu FFT Plot
+        self.ax_fft.set_title("FFT Plot", fontweight="bold", color="#000000", fontsize=12)
+        self.ax_fft.set_ylabel("Amplitudo (µV)", color="#000000", fontsize=11, fontweight="bold")
+        self.ax_fft.set_xlabel("Frekuensi (Hz)", color="#000000", fontsize=11, fontweight="bold")
+        
         self.ax_fft.grid(True, alpha=0.3)
         self.line_fft, = self.ax_fft.plot([], [], color='#e67e22', lw=1.2)
         self.fig_fft.tight_layout()
@@ -76,7 +115,12 @@ class MonitorPage(QWidget):
         self.fig_bar = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_bar = FigureCanvas(self.fig_bar)
         self.ax_bar = self.fig_bar.add_subplot(111)
-        self.ax_bar.set_title("Persentase Pita Frekuensi Sinyal Otak", fontweight="bold", color="#1e293b", fontsize=10)
+        
+        # SESUAI GAMBAR 3: Mengubah judul, label sumbu y, dan label bawah Ch. 1
+        self.ax_bar.set_title("Persentase Pita Frekuensi", fontweight="bold", color="#000000", fontsize=12)
+        self.ax_bar.set_ylabel("Persentase (%)", color="#000000", fontsize=11, fontweight="bold")
+        self.ax_bar.set_xlabel("Ch. 1", color="#000000", fontsize=11, fontweight="bold")
+        
         self.bands_label = ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma']
         self.bar_colors = ['#ef4444', '#a855f7', '#06b6d4', '#22c55e', '#eab308']
         self.bar_rects = self.ax_bar.bar(self.bands_label, [0]*5, color=self.bar_colors, edgecolor='none', width=0.6)
@@ -93,8 +137,21 @@ class MonitorPage(QWidget):
         self.fig_pie = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_pie = FigureCanvas(self.fig_pie)
         self.ax_pie = self.fig_pie.add_subplot(111)
-        self.ax_pie.set_title("Distribusi Gelombang Otak", fontweight="bold", color="#1e293b", fontsize=10)
+        
+        # 4. REAL-TIME PIE CHART PANEL
+        frame_pie = QFrame()
+        frame_pie.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
+        layout_pie = QVBoxLayout(frame_pie)
+        self.fig_pie = Figure(figsize=(5, 3.5), dpi=90)
+        self.canvas_pie = FigureCanvas(self.fig_pie)
+        self.ax_pie = self.fig_pie.add_subplot(111)
+        
+        # Sesuai Gambar 4: Mengubah judul proporsi gelombang otak
+        self.ax_pie.set_title("Proporsi Gelombang", fontweight="bold", color="#000000", fontsize=12)
         self.ax_pie.axis('off')  
+        self.ax_pie.text(0.5, -0.1, "Ch. 1", color="#000000", fontsize=11, fontweight="bold",
+                         ha='center', va='center', transform=self.ax_pie.transAxes)
+    
         self.fig_pie.tight_layout()
         layout_pie.addWidget(self.canvas_pie)
         splitter_baris_bawah.addWidget(frame_pie)
@@ -106,35 +163,12 @@ class MonitorPage(QWidget):
         splitter_baris_bawah.setSizes([500, 500])
         main_layout.addWidget(splitter_vertikal_induk, 1)
         
-        # ================= BOTTOM CONTROLS =================
-        ctrl_layout = QHBoxLayout()
-        self.status_label = QLabel("   Status BLE: Terputus")
-        self.status_label.setStyleSheet("font-weight: bold; color: #64748b; font-size:11pt;")
-        
-        self.connect_btn = QPushButton("🔌 Hubungkan Alat & Start Stream")
-        self.connect_btn.setCursor(Qt.PointingHandCursor)
-        self.connect_btn.clicked.connect(self.connect_hardware)
-        self.connect_btn.setStyleSheet("background-color: #16a34a; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
-        
-        self.disconnect_btn = QPushButton("🛑 Putus Koneksi")
-        self.disconnect_btn.setCursor(Qt.PointingHandCursor)
-        self.disconnect_btn.clicked.connect(self.disconnect_hardware)
-        self.disconnect_btn.setEnabled(False)
-        self.disconnect_btn.setStyleSheet("background-color: #dc2626; color: white; font-weight:bold; padding:10px 20px; border:none; border-radius:6px;")
-        
-        ctrl_layout.addWidget(self.status_label)
-        ctrl_layout.addStretch()
-        ctrl_layout.addWidget(self.connect_btn)
-        ctrl_layout.addWidget(self.disconnect_btn)
-        main_layout.addLayout(ctrl_layout)
-
     def start_test(self, subjek_data):
         self.current_subjek = subjek_data
         info_teks = f"   Subjek Aktif: {subjek_data['nama'].upper()} ({subjek_data['jenis_kelamin']}, {subjek_data['umur']} Tahun) | ID: #{subjek_data['id']}"
         self.patient_bar.setText(info_teks)
         
     def connect_hardware(self):
-        """Menghubungkan langsung ke jembatan data asinkron"""
         self.connect_btn.setEnabled(False)
         try:
             self.ble_worker.data_received.disconnect()
@@ -147,7 +181,6 @@ class MonitorPage(QWidget):
         self.ble_worker.start()
 
     def disconnect_hardware(self):
-        """Mematikan jalur sinyal data"""
         if self.ble_worker:
             self.ble_worker.stop()
             self.ble_worker.wait()
@@ -165,7 +198,6 @@ class MonitorPage(QWidget):
             self.disconnect_btn.setEnabled(True)
 
     def process_new_data(self, val):
-        """Mekanisme sliding window 10 detik skala voltase murni"""
         voltage = ((val - 2048.0) / 4095.0) * 3.3
         
         self.raw_data.pop(0)
@@ -210,7 +242,9 @@ class MonitorPage(QWidget):
                     self.canvas_bar.draw_idle()
                     
                     self.ax_pie.clear() 
-                    self.ax_pie.set_title("Distribusi Gelombang Otak", fontweight="bold", color="#1e293b", fontsize=10)
+                    
+                    # PENTING: Menjaga konsistensi perubahan teks judul Pie Chart saat di-refresh datanya
+                    self.ax_pie.set_title("proporsi gelombang", fontweight="bold", color="#dc2626", fontsize=12)
                     self.ax_pie.axis('off') 
                     
                     self.ax_pie.pie(

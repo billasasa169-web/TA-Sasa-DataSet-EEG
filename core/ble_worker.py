@@ -5,7 +5,6 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from bleak import BleakClient, BleakScanner
 
 class BLEWorker(QThread):
-    # Sinyal komunikasi ke UI thread (jika dibutuhkan nantinya)
     data_received = pyqtSignal(int)
     status_changed = pyqtSignal(str)
 
@@ -56,10 +55,15 @@ class BLEWorker(QThread):
                 self.client = client
                 self.status_changed.emit("Status BLE: Terhubung")
                 print("⚡ [KONEKSI SUKSES] Berhasil Terkoneksi dengan ESP32-S3!")
-                print("▶ Menunggu aliran notifikasi paket biner masuk...\n")
+                print("▶️ Menutup gerbang aman dan membuka aliran NOTIFY secara murni...")
                 
-                # Buka katup aliran notifikasi data biner 14 Byte dari ESP32
+                # Jeda tipis memberikan waktu bagi Windows OS menyusun GATT cache
+                await asyncio.sleep(0.5)
+
+                # Buka katup aliran notifikasi data biner 14 Byte langsung secara legal via Bleak
                 await client.start_notify(self.TX_UUID, self.notification_handler)
+                print("🚀 [ALIRAN DATA AKTIF] Memantau data EEG masuk ke terminal...")
+                print("=====================================================\n")
                 
                 # Menjaga loop asinkron agar tetap hidup selama menangkap stream data
                 while self.running:
@@ -97,7 +101,8 @@ class BLEWorker(QThread):
                 # Pancarkan ke UI Thread untuk kebutuhan visualisasi grafik
                 self.data_received.emit(adc_value)
         else:
-            print(f"⚠️ Paket tidak lolos validasi struktur, panjang: {len(data)} byte.")
+            # Jika ada kebocoran ukuran data byte yang bergeser di udara, cetak langsung di sini untuk analisa
+            print(f"⚠️ Data Masuk (Format Tidak Sesuai), Ukuran: {len(data)} Byte | Raw Hex: {data.hex().upper()}")
 
     def handle_disconnect(self, client):
         print("⚠️ Perangkat terputus secara mendadak di level OS Windows!")

@@ -24,6 +24,7 @@ class FormPage(QWidget):
         # Wadah Utama Form agar Berada di Tengah Halaman (Horizontal Stretching)
         form_container = QHBoxLayout()
         self.form_layout = QFormLayout()
+        self.form_layout.setLabelAlignment(Qt.AlignRight)
         self.form_layout.setHorizontalSpacing(24)
         self.form_layout.setVerticalSpacing(18)
 

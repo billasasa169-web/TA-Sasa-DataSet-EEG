@@ -57,3 +57,71 @@ class DBManager:
             cursor = conn.cursor()
             cursor.execute("SELECT id, nama, umur, jenis_kelamin, created_at FROM subjects ORDER BY id DESC")
             return cursor.fetchall()
+    
+    def simpan_riwayat_grafik(self, subjek_id, tanggal, blob_gambar, analisis_teks=""):
+        """Menyimpan data biner screenshot ke tabel riwayat dengan context manager yang benar"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS riwayat_grafik (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        subjek_id INTEGER,
+                        tanggal TEXT,
+                        screenshot BLOB,
+                        analisis TEXT
+                    )
+                """)
+                cursor.execute(
+                    "INSERT INTO riwayat_grafik (subjek_id, tanggal, screenshot, analisis) VALUES (?, ?, ?, ?)",
+                    (subjek_id, tanggal, blob_gambar, analisis_teks)
+                )
+                conn.commit()
+                print("✅ [SQLITE SUCCESS] Screenshot grafik berhasil disimpan ke database!")
+        except Exception as e:
+            print(f"❌ Database Error (simpan_riwayat_grafik): {e}")
+
+    def ambil_screenshot_terakhir(self, subjek_id):
+        """Mengambil data screenshot PNG biner terbaru berdasarkan ID subjek"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT screenshot, analisis FROM riwayat_grafik WHERE subjek_id = ? ORDER BY id DESC LIMIT 1",
+                    (subjek_id,)
+                )
+                res = cursor.fetchone()
+                return res if res else (None, "")
+        except Exception as e:
+            print(f"❌ Database Error (ambil_screenshot_terakhir): {e}")
+            return None
+    
+    def update_analisis_saja(self, subjek_id, teks_baru):
+        """Memperbarui teks analisis saja tanpa mengubah gambar screenshot yang sudah ada"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE riwayat_grafik SET analisis = ? WHERE id = (SELECT id FROM riwayat_grafik WHERE subjek_id = ? ORDER BY id DESC LIMIT 1)",
+                    (teks_baru, subjek_id)
+                )
+                conn.commit()
+                print("✅ [SQLITE SUCCESS] Teks analisis berhasil diperbarui!")
+                return True
+        except Exception as e:
+            print(f"❌ Database Error (update_analisis_saja): {e}")
+            return False
+
+    def hapus_rekaman_subjek(self, subjek_id):
+        """Menghapus total data subjek dan riwayat grafiknya secara sinkron dari database"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # PERBAIKAN: Nama tabel disesuaikan dari 'subjek' menjadi 'subjects' sesuai init_db
+                cursor.execute("DELETE FROM subjects WHERE id = ?", (subjek_id,))
+                # Hapus riwayat gambar pendukungnya
+                cursor.execute("DELETE FROM riwayat_grafik WHERE subjek_id = ?", (subjek_id,))
+                conn.commit()
+                print(f"🗑️ Rekaman ID #{subjek_id} beserta grafiknya sukses dihapus permanen.")
+        except Exception as e:
+            print(f"❌ Database Error (hapus_rekaman): {e}")

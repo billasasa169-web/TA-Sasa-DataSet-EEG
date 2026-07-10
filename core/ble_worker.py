@@ -5,7 +5,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from bleak import BleakClient, BleakScanner
 
 class BLEWorker(QThread):
-    data_received = pyqtSignal(int)
+    data_received = pyqtSignal(list)
     status_changed = pyqtSignal(str)
 
     def __init__(self):
@@ -20,6 +20,8 @@ class BLEWorker(QThread):
         # UUID Karakteristik TX (Sesuai sketsa Arduino Anda)
         self.SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
         self.TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e" 
+        self.data_buffer = []
+        self.buffer_size = 20
 
     def run(self):
         """Titik masuk thread utama QThread"""
@@ -55,17 +57,17 @@ class BLEWorker(QThread):
                 self.client = client
                 self.status_changed.emit("Status BLE: Terhubung")
                 print("⚡ [KONEKSI SUKSES] Berhasil Terkoneksi dengan ESP32-S3!")
-                print("▶️ Menutup gerbang aman dan membuka aliran NOTIFY secara murni...")
+                print("▶️ Membuka aliran NOTIFY secara otomatis...")
                 
                 # Jeda tipis memberikan waktu bagi Windows OS menyusun GATT cache
                 await asyncio.sleep(0.5)
 
-                # Buka katup aliran notifikasi data biner 14 Byte langsung secara legal via Bleak
+                # Buka katup aliran notifikasi data biner 6 Byte langsung
                 await client.start_notify(self.TX_UUID, self.notification_handler)
                 print("🚀 [ALIRAN DATA AKTIF] Memantau data EEG masuk ke terminal...")
                 print("=====================================================\n")
                 
-                # Menjaga loop asinkron agar tetap hidup selama menangkap stream data
+                # Menjaga loop asinkron agar tetap hidup selama menangkap stream data otomatis
                 while self.running:
                     await asyncio.sleep(0.1)
                 
@@ -79,30 +81,37 @@ class BLEWorker(QThread):
 
     def notification_handler(self, sender, data):
         """
-        MEKANISME PEMECAHAN BINER: Mengurai paket batch 14 Byte menjadi 5 data desimal ADC
-        dan mencetaknya secara real-time ke terminal konsol.
+        MEKANISME PEMECAHAN BINER: Mengurai paket tunggal 6 Byte dari ESP32-S3
+        dengan optimasi buffer throttling dan kalkulasi Amplitudo (µV) untuk terminal.
         """
-        # Validasi struktur paket batch: [0xC7][0x7C][Counter] ... [0x01]
-        if len(data) == 14 and data[0] == 0xC7 and data[1] == 0x7C and data[13] == 0x01:
-            packet_counter = data[2]
-            print(f"📦 [RAW BATCH ARRIVED] Counter Paket: {packet_counter} | Hex Array: {data.hex().upper()}")
+        if len(data) == 6 and data[0] == 0xC7 and data[1] == 0x7C and data[5] == 0x01: # 
+            packet_counter = data[2] # 
             
-            # Memecah 14 Byte data biner menjadi 5 sampel data ADC 12-bit murni
-            for i in range(5):
-                high_byte = data[3 + i * 2]
-                low_byte = data[3 + i * 2 + 1]
+            high_byte = data[3] # 
+            low_byte = data[4] # 
+            adc_value = (high_byte << 8) | low_byte # 
+            
+            # --- MASUKKAN DATA KE BUFFER TERLEBIH DAHULU ---
+            self.data_buffer.append(adc_value) # 
+            
+            # --- HITUNG AMPLITUDO MIKROVOLT (µV) SECARA REAL-TIME ---
+            # Menggunakan rata-rata dari data buffer yang tersedia untuk detrending dinamis
+            nilai_tengah_dinamis = sum(self.data_buffer) / len(self.data_buffer)
+            
+            # Rumus Kalibrasi Medis: ((ADC - Rata_Rata) / 4095.0) * 3.3V / GAIN * 10^6
+            TOTAL_GAIN = 1000.0
+            amplitudo_uV = (((adc_value - nilai_tengah_dinamis) / 4095.0) * 3.3 / TOTAL_GAIN) * 1000000.0
+            
+            # CETAK KE TERMINAL (Format pembulatan 1 angka di belakang koma agar rapi)
+            # print(f"Paket: {packet_counter} | ADC: {adc_value} | Amplitudo: {amplitudo_uV:.1f} µV")
+            
+            # Jika buffer sudah mencapai batas ukuran, pancarkan sekaligus ke UI
+            if len(self.data_buffer) >= self.buffer_size: # 
+                self.data_received.emit(self.data_buffer) # 
+                self.data_buffer = [] # Kosongkan kembali buffer untuk batch berikutnya 
                 
-                # Operasi bitwise rekonstruksi data integer asli (0-4095)
-                adc_value = (high_byte << 8) | low_byte
-                
-                # Cetak hasil pemecahan biner murni secara real-time ke terminal
-                print(f"   └── Sampel ke-{i+1}: {adc_value} (ADC Count)")
-                
-                # Pancarkan ke UI Thread untuk kebutuhan visualisasi grafik
-                self.data_received.emit(adc_value)
         else:
-            # Jika ada kebocoran ukuran data byte yang bergeser di udara, cetak langsung di sini untuk analisa
-            print(f"⚠️ Data Masuk (Format Tidak Sesuai), Ukuran: {len(data)} Byte | Raw Hex: {data.hex().upper()}")
+            print(f"⚠️ Data Corrupt / Potong | Ukuran: {len(data)} Byte") #
 
     def handle_disconnect(self, client):
         print("⚠️ Perangkat terputus secara mendadak di level OS Windows!")

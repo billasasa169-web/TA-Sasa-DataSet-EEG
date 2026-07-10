@@ -11,12 +11,12 @@ from ui.history_page import HistoryPage
 from core.ble_worker import BLEWorker # Menggunakan BLEWorker asinkron mandiri
 
 class MainWindow(QMainWindow):
-    def __init__(self, db_manager, ble_worker_placeholder=None):
+    def __init__(self, db_manager, ble_worker):
         super().__init__()
         self.db_manager = db_manager
         
         # Inisialisasi Instance BLEWorker Mandiri untuk Background Thread
-        self.ble_worker = BLEWorker()
+        self.ble_worker = ble_worker
         self.is_subject_ready = False 
         
         # Konfigurasi Path Folder Assets secara Absolut (Root Project)
@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
         self.current_sidebar_target = self.sidebar_normal_width
         
         self.setWindowTitle("Sistem Pemantauan EEG Nirkabel")
-        self.resize(1300, 800)
+        self.resize(1500, 800)
         self.init_ui()
 
     def init_ui(self):

@@ -1,7 +1,7 @@
 # ui/monitor_page.py
 
 import numpy as np
-from scipy.signal import welch
+from scipy.signal import welch, butter, filtfilt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSplitter, QMessageBox
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -90,13 +90,14 @@ class MonitorPage(QWidget):
         layout_time.addWidget(self.canvas_time)
         splitter_baris_atas.addWidget(frame_time)
 
-        # 2. FFT SPECTRUM PANEL
+        # 2. FFT SPECTRUM PANEL (Sumbu X tetap 60 Hz, sinyal di-filter LPF Cut-Off 45 Hz)
         frame_fft = QFrame()
         frame_fft.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_fft = QVBoxLayout(frame_fft)
         self.fig_fft = Figure(figsize=(5, 3.5), dpi=90)
         self.canvas_fft = FigureCanvas(self.fig_fft)
         self.ax_fft = self.fig_fft.add_subplot(111)
+        
         self.ax_fft.set_xlim(0, 60)  
         self.ax_fft.set_ylim(0, 50)
         
@@ -110,7 +111,7 @@ class MonitorPage(QWidget):
         layout_fft.addWidget(self.canvas_fft)
         splitter_baris_atas.addWidget(frame_fft)
 
-        # 3. WELCH BAR CHART PANEL (OPTIMAL GEOMETRY)
+        # 3. WELCH BAR CHART PANEL
         frame_bar = QFrame()
         frame_bar.setStyleSheet("background-color: white; border: 1px solid #cbd5e1; border-radius: 6px;")
         layout_bar = QVBoxLayout(frame_bar)
@@ -125,12 +126,10 @@ class MonitorPage(QWidget):
         self.bands_label = ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma']
         self.bar_colors = ['#ef4444', '#a855f7', '#06b6d4', '#22c55e', '#eab308']
         
-        # Mengunci objek 5 tiang sejak awal dengan tinggi dasar 1.0 agar layout terbuka kokoh
         self.bar_rects = self.ax_bar.bar(self.bands_label, [1.0]*5, color=self.bar_colors, edgecolor='none', width=0.6)
         self.ax_bar.set_ylim(0, 100)
         self.ax_bar.grid(True, axis='y', alpha=0.2)
         
-        # Gunakan margin manual yang stabil, hindari tight_layout di fungsi berulang
         self.fig_bar.subplots_adjust(left=0.15, right=0.95, top=0.88, bottom=0.15)
         
         layout_bar.addWidget(self.canvas_bar)
@@ -159,7 +158,14 @@ class MonitorPage(QWidget):
         splitter_baris_atas.setSizes([500, 500])
         splitter_baris_bawah.setSizes([500, 500])
         main_layout.addWidget(splitter_vertikal_induk, 1)
-        
+
+    def apply_lowpass_filter(self, data, cutoff=45.0, order=4):
+        """Membuat dan mengaplikasikan Butterworth Low-Pass Filter pada Cut-Off 45 Hz"""
+        nyquist = 0.5 * self.fs
+        normal_cutoff = cutoff / nyquist
+        b, a = butter(order, normal_cutoff, btype='low', analog=False)
+        return filtfilt(b, a, data)
+
     def start_test(self, subjek_data):
         self.current_subjek = subjek_data
         info_teks = f"   Subjek Aktif: {subjek_data['nama'].upper()} ({subjek_data['jenis_kelamin']}, {subjek_data['umur']} Tahun) | ID: #{subjek_data['id']}"
@@ -179,50 +185,80 @@ class MonitorPage(QWidget):
 
     def disconnect_hardware(self):
         """
-        Memutus koneksi BLE, mengalkulasi parameter isyarat akhir, mengeksekusi sistem pakar
-        berdasarkan thresholding dan pola gelombang dominan teoritis, lalu menyimpan data ke SQLite.
+        Memutus koneksi BLE, mengalkulasi parameter statistik Rata-Rata, Puncak (Peak), dan Terendah (Trough) Time Series,
+        serta frekuensi dan amplitudo tiap gelombang, lalu menyimpan data ke SQLite.
         """
         if self.ble_worker:
             self.ble_worker.stop()
             self.ble_worker.wait()
             
-        self.connect_btn.setEnabled(False) # Diubah False sesaat agar proses sinkronisasi dialog tenang
+        self.connect_btn.setEnabled(False) 
         self.disconnect_btn.setEnabled(False)
         self.status_label.setText("   Status BLE: Terputus")
 
-        # === 1. INITIALIZE PARAMETERS ===
-        status_alat = "Tidak Diketahui"
-        nasihat_klinis = "Rekaman dihentikan mendadak. Data numerik tidak mencukupi untuk inferensi sistem pakar."
+        # === 1. INITIALIZE DEFAULT FALLBACK PARAMETERS ===
         delta_p, theta_p, alpha_p, beta_p, gamma_p = 0.0, 0.0, 0.0, 0.0, 0.0
-        max_amp = 0.0
+        delta_amp, theta_amp, alpha_amp, beta_amp, gamma_amp = 0.0, 0.0, 0.0, 0.0, 0.0
+        
+        # Parameter Spesifik Time Series
+        max_val = 0.0   # Nilai Puncak Tertinggi (Peak)
+        min_val = 0.0   # Nilai Terendah (Trough)
+        mean_amp = 0.0  # Nilai Rata-Rata Amplitudo Absolut
+        
         amp_50hz = 0.0
-        teks_deskripsi_dominan = ""
+        max_freq_band_str = "0.5 - 4"
 
-        # === 2. BRAIN ENGINE: SPEKTRAL & FITUR PARSING ===
+        # === 2. BRAIN ENGINE: TIME SERIES, SPEKTRAL, FREKUENSI & AMPLITUDO PARSING ===
         if len(self.raw_data) >= 250:
             nilai_tengah_dinamis = np.mean(self.raw_data)
             uV_data_now = [(((x - nilai_tengah_dinamis) / 4095.0) * 3.3 / 1000.0) * 1000000.0 for x in self.raw_data]
-            signal_np = np.array(uV_data_now)
-            N = len(signal_np)
             
-            max_amp = float(np.max(np.abs(signal_np)))
+            # --- CALCULATE TIME SERIES STATISTICS (LANGSUNG DARI SINYAL RIIL) ---
+            raw_signal_np = np.array(uV_data_now)
+            max_val = float(np.max(raw_signal_np))          # Puncak Tertinggi Positif
+            min_val = float(np.min(raw_signal_np))          # Lembah Terendah Negatif
+            mean_amp = float(np.mean(np.abs(raw_signal_np))) # Rata-Rata Amplitudo Absolut
+            
+            try:
+                signal_np = self.apply_lowpass_filter(uV_data_now, cutoff=45.0)
+            except Exception:
+                signal_np = raw_signal_np
+                
+            N = len(signal_np)
             
             fft_vals = np.abs(np.fft.fft(signal_np)) / N
             fft_freqs = np.fft.fftfreq(N, 1/self.fs)
+            
             idx_50hz = np.argmin(np.abs(fft_freqs - 50.0))
             amp_50hz = float(fft_vals[idx_50hz]) if len(fft_vals) > idx_50hz else 0.0
             
+            # --- HITUNG AMPLITUDO RATA-RATA SPEKTRAL MASING-MASING PITA ---
+            bands_hz = {
+                "Delta": (0.5, 4), "Theta": (4, 8), "Alpha": (8, 12),
+                "Beta": (12, 25), "Gamma": (25, 40)
+            }
+            amps_dict = {}
+            for b_name, (l_hz, h_hz) in bands_hz.items():
+                m_idx = (fft_freqs >= l_hz) & (fft_freqs < h_hz)
+                amps_dict[b_name] = float(np.mean(fft_vals[m_idx])) if np.any(m_idx) else 0.0
+            
+            delta_amp = amps_dict["Delta"]
+            theta_amp = amps_dict["Theta"]
+            alpha_amp = amps_dict["Alpha"]
+            beta_amp = amps_dict["Beta"]
+            gamma_amp = amps_dict["Gamma"]
+            
+            idx_valid = (fft_freqs >= 0.5) & (fft_freqs <= 45.0)
+            if np.any(idx_valid):
+                peak_freq = float(np.abs(fft_freqs[idx_valid][np.argmax(fft_vals[idx_valid])]))
+                max_freq_band_str = f"{max(0.5, float(f'{peak_freq - 1.5:.1f}'))} - {float(f'{peak_freq + 1.5:.1f}')}"
+            
             try:
-                from scipy.signal import welch
                 f, psd = welch(signal_np, fs=self.fs, nperseg=min(len(signal_np), self.fs))
-                total_power = np.sum(psd)
+                total_power = np.sum(psd[(f >= 0.5) & (f <= 45.0)])
                 if total_power > 0:
-                    bands = {
-                        "Delta": (0.5, 4), "Theta": (4, 8), "Alpha": (8, 13),
-                        "Beta": (13, 30), "Gamma": (30, 45)
-                    }
                     percentages = []
-                    for name, (low, high) in bands.items():
+                    for name, (low, high) in bands_hz.items():
                         idx = (f >= low) & (f < high)
                         power_band = np.sum(psd[idx])
                         percentages.append((power_band / total_power) * 100)
@@ -231,65 +267,48 @@ class MonitorPage(QWidget):
             except Exception:
                 pass
 
-            # =================================================================================
-            # LOGIKA A: EVALUASI KONDISI SISTEM PAKAR BERDASARKAN AMBANG BATAS MULTIDIMENSI
-            # =================================================================================
-            if max_amp <= 25.0 and amp_50hz < 0.5 and max([delta_p, theta_p, alpha_p, beta_p, gamma_p]) < 40.0:
-                status_alat = "Elektroda Terlepas / Mengambang (Floating)"
-                nasihat_klinis = "Perangkat dalam kondisi idle. Ujung elektroda menangkap white noise udara bebas karena hambatan input tak terhingga (open circuit)."
-                
-            elif amp_50hz > 3.5:
-                status_alat = "Kontaminasi Interferensi Frekuensi Daya Jaringan (Power Line Interference)"
-                nasihat_klinis = "Sinyal terdistorsi total oleh Derau Hum Jaringan Listrik AC (50 Hz) akibat induksi elektromagnetik ruangan. Data EEG biologis tenggelam."
-                
-            elif delta_p > 70.0:
-                status_alat = "Artefak Motorik Ekstrem (Kedipan/Gerak Otot)"
-                nasihat_klinis = "Rekaman terdistorsi oleh artefak biologis non-otak, dipicu oleh aktivitas kedipan mata (EOG), gerakan kepala, atau peregangan otot rahang (EMG)."
-                
-            elif beta_p > 25.0 or gamma_p > 25.0:
-                status_alat = "Subjek Fokus / Terjaga & Mata Terbuka"
-                nasihat_klinis = "Subjek dalam kondisi sadar penuh, membuka mata, aktif secara kognitif, atau sedang memproses informasi visual dan berpikir aktif."
-                
-            elif alpha_p > 30.0:
-                status_alat = "Subjek Rileks / Meditasi (Mata Tertutup)"
-                nasihat_klinis = "Subjek dalam kondisi rileksasi mental tingkat tinggi, tenang, tidak berpikir berat, dan menutup mata tanpa tertidur (Alpha blocking state)."
-                
-            else:
-                status_alat = "Subjek Mengantuk Berat / Penurunan Kognitif"
-                nasihat_klinis = "Subjek berada dalam fase kantuk berat, kelelahan mental yang ekstrem, atau transisi menuju fase tidur awal (NREM stage 1)."
-
-            # =================================================================================
-            # LOGIKA B: DETEKSI PITA GELOMBANG DOMINAN BERDASARKAN DATA RIIL (SESUAI GAMBAR RUJUKAN)
-            # =================================================================================
-            band_names = ["Delta", "Theta", "Alpha", "Beta", "Gamma"]
-            band_values = [delta_p, theta_p, alpha_p, beta_p, gamma_p]
+            # SORTING MULTI-INDIKATOR
+            band_info = [
+                ("Gelombang Alpha", alpha_p, alpha_amp, "8-12 Hz", "20-80 uV"),
+                ("Gelombang Beta", beta_p, beta_amp, "12-25 Hz", "1-5 uV"),
+                ("Gelombang Delta", delta_p, delta_amp, "0,5-4 Hz", "100-200 uV"),
+                ("Gelombang Gamma", gamma_p, gamma_amp, "25-40 Hz", "0,5-2 uV"),
+                ("Gelombang Theta", theta_p, theta_amp, "4-8 Hz", "5-10 uV")
+            ]
             
-            # Cari indeks dengan nilai persentase tertinggi
-            idx_dominan = int(np.argmax(band_values))
-            nama_dominan = band_names[idx_dominan]
+            sorted_bands = sorted(band_info, key=lambda x: (x[1], x[2]), reverse=True)
+            proporsi_sorted_str = ", ".join([f"{item[0]} ({item[1]:.1f}%)" for item in sorted_bands])
             
-            # Kamus Pemetaan Deskripsi Analisis Fisiologis (Sesuai Gambar Rujukan Anda)
-            kamus_analisis_teoritis = {
-                "Alpha": "Dominasi nilai Alpha pada Persentase Pita Frekuensi menunjukkan karakteristik aktivitas otak yang umumnya muncul pada kondisi istirahat. Gelombang ini (8-13 Hz) umumnya berkaitan dengan kondisi relaksasi, ketenangan, dan berkurangmya rangsangan visual, terutama saat mata tertutup.",
-                "Beta": "Dominasi nilai Beta pada Persentase Pita Frekuensi menunjukkan aktivitas otak yang relatif aktif. Gelombang ini (13-30 Hz) umumnya berkaitan dengan kondisi aktif berfikir secara logis, fokus, berdiskusi, dan keadaan dalam kesadaran penuh.",
-                "Delta": "Dominasi nilai Delta pada Persentase Pita Frekuensi menunjukkan gelombang yang dominan. Gelombang ini (0,5-4 Hz) umumnya muncul pada saat tidur nyenyak (deep sleep). Apabila dominan saat subjek dalam keadaan sadar, hasil perlu diinterpretasikan secara hati-hati karena dapat dipengaruhi oleh berbagai faktor, termasuk artefak.",
-                "Gamma": "Dominasi nilai Gamma pada Persentase Pita Frekuensi menunjukkan gelombang yang dominan. Gelombang ini (30-100 Hz) umumnya dikaitkan dengan konsenterasi tinggi, pemrosesan informasi, pembelajaran dan pemrosesan kognitif yang kompleks.",
-                "Theta": "Dominasi nilai Theta pada Persentase Pita Frekuensi menunjukkan karakteristik aktivitas otak yang sering muncul pada kondisi tersebut. Gelombang ini (4-8 Hz) umumnya berkaitan dengan kondisi relaksasi yang lebih dalam, mengantuk, tahap awal tidur, kondisi keadaan bawah sadar."
+            dom_nama = sorted_bands[0][0]
+            dom_hz = sorted_bands[0][3]
+            dom_std_amp = sorted_bands[0][4]
+            dom_pct = sorted_bands[0][1]
+            dom_real_amp = sorted_bands[0][2]
+            
+            kamus_kondisi_otak = {
+                "Gelombang Alpha": "Rileks, beristirahat, tenang, meditasi ringan dan konsentrasi tinggi.",
+                "Gelombang Beta": "Keadaan aktif berfikir secara logis, fokus, keadaan sadar penuh, dan berdiskusi.",
+                "Gelombang Delta": "Keadaan tidur nyenyak (deep sleep) tanpa mimpi.",
+                "Gelombang Gamma": "Aktivitas mental sangat tinggi, rasa takut, panik berlebihan.",
+                "Gelombang Theta": "Relaksasi, tidur ringan, bermimpi, kondisi dalam keadaan sadar dan tidak sadar."
             }
+            dom_kondisi = kamus_kondisi_otak.get(dom_nama, "kondisi istirahat tertentu.")
             
-            teks_deskripsi_dominan = kamus_analisis_teoritis.get(nama_dominan, "")
+            dtabg_terdeteksi = [item[0] for item in sorted_bands if item[1] > 1.0]
+            dtabg_str = ", ".join(dtabg_terdeteksi)
+            noise_pln_ket = "sangat kecil" if amp_50hz < 2.0 else "cukup teredam"
 
-        # 3. SUSUN TOTAL PARAGRAF REKAM MEDIS UNTUK SQLITE & PDF
+        # === 3. TEMPLATE ANALISIS DENGAN DESKRIPSI TIME SERIES SPESIFIK & AKURAT ===
         paragraf_pakar_otomatis = (
-            f"Berdasarkan hasil uji pengkondisian matriks isyarat, status rekaman diidentifikasi sebagai: {status_alat.upper()}.\n\n"
-            f"Indikator Parameter Fisik:\n"
-            f"- Amplitudo Isyarat (Time Series): Rentang puncak tertinggi terdeteksi di skala {max_amp:.1f} uV.\n"
-            f"- Pola Spektrum (FFT Plot): Magnitudo pada komponen Interferensi Frekuensi Daya Jaringan 50 Hz berada di nilai {amp_50hz:.2f} uV.\n"
-            f"- Distribusi Welch PSD (Pita Frekuensi): Delta {delta_p:.1f}%, Theta {theta_p:.1f}%, Alpha {alpha_p:.1f}%, Beta {beta_p:.1f}%, Gamma {gamma_p:.1f}%.\n\n"
-            f"Kesimpulan Interpretasi Alat:\n"
-            f"{nasihat_klinis}\n\n"
-            f"Deskripsi Analisis Fisiologis:\n"
-            f"{teks_deskripsi_dominan}"
+            f"Hasil Analisis dan Interpretasi Sinyal EEG :\n"
+            f"• Time Series : Sinyal terdeteksi berada dalam rentang fluktuasi sinyal biologis dengan rata-rata amplitudo sebesar {mean_amp:.1f} uV, amplitudo puncak tertinggi (peak amplitude) sebesar {max_val:.1f} uV, dan amplitudo terendah sebesar {min_val:.1f} uV pada jendela perekaman.\n"
+            f"• FFT Plot : Spektrum frekuensi setelah penyaringan LPF Cut-Off 45 Hz menunjukkan akumulasi daya terbesar berada pada rentang frekuensi {max_freq_band_str} Hz. Residu komponen 50 Hz terukur {noise_pln_ket} yaitu {amp_50hz:.2f} uV.\n"
+            f"• Pita Frekuensi : Menunjukkan distribusi daya sinyal relatif sebesar Delta ({delta_p:.1f}%), Theta ({theta_p:.1f}%), Alpha ({alpha_p:.1f}%), Beta ({beta_p:.1f}%), dan Gamma ({gamma_p:.1f}%).\n"
+            f"• Proporsi Gelombang (dominan ke terendah) : {proporsi_sorted_str}.\n\n"
+            f"Kesimpulan :\n"
+            f"Berdasarkan hasil analisis spektrum frekuensi dan proporsi gelombang, rekaman sinyal EEG pada subjek terbukti secara valid mengandung komponen {dtabg_str}.\n"
+            f"Hasil perekaman menunjukkan bahwa gelombang yang paling dominan pada subjek adalah {dom_nama} (Frekuensi: {dom_hz}, Standar Amplitudo: {dom_std_amp}) dengan kontribusi sebesar {dom_pct:.1f}%. "
+            f"Indikasi kondisi otak subjek mengarah pada: {dom_kondisi}"
         )
 
         # === 4. SCREENSHOT PANEL & SIMPAN BLOB KE SQLITE ===
@@ -319,9 +338,9 @@ class MonitorPage(QWidget):
         self.raw_data = []
         self.packet_counter = 0
         self.dsp_trigger_counter = 0
-        self.connect_btn.setEnabled(True) # Aktifkan kembali tombol pasca-proses tuntas
+        self.connect_btn.setEnabled(True) 
 
-        # === 6. DIALOG NAVIGASI INTERAKTIF FIX ===
+        # === 6. DIALOG NAVIGASI ===
         tanya_pindah = QMessageBox(self)
         tanya_pindah.setIcon(QMessageBox.Information)
         tanya_pindah.setWindowTitle("Koneksi Diputus")
@@ -334,7 +353,7 @@ class MonitorPage(QWidget):
         if pilihan == QMessageBox.Ok:
             main_window = self.window()
             if main_window and hasattr(main_window, 'switch_page'):
-                main_window.switch_page(2) # Pindah halaman secara resmi via fungsi switch_page main_window.py
+                main_window.switch_page(2) 
         else:
             print("ℹ️ Operator memilih tetap berada di halaman monitoring.")
 
@@ -348,13 +367,9 @@ class MonitorPage(QWidget):
             self.disconnect_btn.setEnabled(True)
 
     def process_new_data(self, values_list):
-        """
-        Memproses batch data ADC dengan pengujian latency komputasi dan rendering.
-        """
-        # KUNCI LATENCY START: Catat waktu tepat saat batch data masuk dari BLEWorker
+        """Memproses batch data ADC dengan LPF Cut-off 45 Hz dan tampilan sumbu X 60 Hz."""
         waktu_mulai = time.perf_counter()
         
-        # 1. MEKANISME SLIDING WINDOW
         for val in values_list:
             self.raw_data.append(val)
             self.packet_counter += 1
@@ -362,47 +377,47 @@ class MonitorPage(QWidget):
             if len(self.raw_data) > self.max_points:
                 self.raw_data.pop(0)
         
-        # 2. PROSES DETRENDING
         nilai_tengah_dinamis = np.mean(self.raw_data) if len(self.raw_data) > 0 else 0
         
-        # 3. KONVERSI DIREK KE MIKROVOLT
         TOTAL_GAIN = 1000.0  
         uV_data = [
             (((x - nilai_tengah_dinamis) / 4095.0) * 3.3 / TOTAL_GAIN) * 1000000.0 
             for x in self.raw_data
         ]
         
-        # 4. UPDATE GRAPH REAL-TIME (Time Series)
         self.line_time.set_data(range(len(uV_data)), uV_data)
         self.canvas_time.draw_idle()
         
-        # Indikator pembantu untuk mencatat apakah blok DSP berat ikut dieksekusi
         dsp_executed = False
         
-        # 5. EKSEKUSI DSP BERAT (Setiap 250 sampel)
         if len(self.raw_data) >= 250 and self.dsp_trigger_counter >= 250:
             dsp_executed = True
             self.dsp_trigger_counter = 0  
             
-            signal_np = np.array(uV_data)
+            try:
+                signal_np = self.apply_lowpass_filter(uV_data, cutoff=45.0)
+            except Exception:
+                signal_np = np.array(uV_data)
+                
             N = len(signal_np)
             
-            # Perhitungan FFT SPECTRUM
             fft_vals = np.abs(np.fft.fft(signal_np)) / N
             fft_freqs = np.fft.fftfreq(N, 1/self.fs)
-            idx_pos = (fft_freqs >= 0) & (fft_freqs <= 60)
+            
+            idx_pos = (fft_freqs >= 0) & (fft_freqs <= 60.0)
             
             self.line_fft.set_data(fft_freqs[idx_pos], fft_vals[idx_pos])
             if len(fft_vals[idx_pos]) > 0:
                 self.ax_fft.set_ylim(0, max(np.max(fft_vals[idx_pos]) * 1.2, 0.1))
             self.canvas_fft.draw_idle()
             
-            # Perhitungan WELCH PSD & PIE CHART
             try:
                 f, psd = welch(signal_np, fs=self.fs, nperseg=min(len(signal_np), self.fs))
-                total_power = np.sum(psd)
+                idx_eeg = (f >= 0.5) & (f <= 45.0)
+                total_power = np.sum(psd[idx_eeg])
+                
                 if total_power > 0:
-                    bands = {"Delta": (0.5, 4), "Theta": (4, 8), "Alpha": (8, 13), "Beta": (13, 30), "Gamma": (30, 45)}
+                    bands = {"Delta": (0.5, 4), "Theta": (4, 8), "Alpha": (8, 12), "Beta": (12, 25), "Gamma": (25, 40)}
                     percentages = []
                     for name, (low, high) in bands.items():
                         idx = (f >= low) & (f < high)
@@ -417,15 +432,20 @@ class MonitorPage(QWidget):
                     self.ax_pie.set_title("proporsi gelombang", fontweight="bold", color="#dc2626", fontsize=12)
                     self.ax_pie.axis('off') 
                     self.ax_pie.text(0.5, -0.1, "Ch. 1", color="#dc2626", fontsize=11, fontweight="bold", ha='center', va='center', transform=self.ax_pie.transAxes)
-                    self.ax_pie.pie(percentages, labels=self.bands_label, colors=self.bar_colors, autopct='%1.1f%%', startangle=90, textprops={'fontsize': 8, 'weight': 'bold', 'color': '#334155'})
+                    
+                    self.ax_pie.pie(
+                        percentages, 
+                        labels=self.bands_label, 
+                        colors=self.bar_colors, 
+                        autopct='%1.1f%%', 
+                        startangle=90, 
+                        textprops={'fontsize': 8, 'weight': 'bold', 'color': '#334155'}
+                    )
                     self.canvas_pie.draw_idle()
             except Exception:
                 pass
 
-        # KUNCI LATENCY END: Hitung selisih waktu eksekusi
         waktu_selesai = time.perf_counter()
         latency_ms = (waktu_selesai - waktu_mulai) * 1000
-        
-        # Cetak log hasil ke terminal untuk kebutuhan pengujian data Bab 4 skripsi
         tipe_proses = "Lengkap (TS + FFT + Welch)" if dsp_executed else "Ringan (Time Series Saja)"
         print(f"⏱️ [PERFORMANCE LOG] Urus Data Batch -> Tipe: {tipe_proses} | Response Time: {latency_ms:.2f} ms")

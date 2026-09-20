@@ -13,7 +13,7 @@ class HistoryPage(QWidget):
         super().__init__()
         self.db_manager = db_manager
         self.on_select_patient_callback = on_select_patient_callback 
-        self.current_is_large = False  # Menyimpan status ukuran layar aktif untuk generator baris tabel
+        self.current_is_large = False
         self.init_ui()
 
     def init_ui(self):
@@ -21,35 +21,35 @@ class HistoryPage(QWidget):
         self.main_layout.setContentsMargins(40, 40, 40, 40)
         self.main_layout.setSpacing(20)
 
-        # Elemen Teks Judul (Dipaksa Rata Tengah / Center Alignment)
+        # Teks Judul Utama Rata Tengah
         self.title = QLabel("RIWAYAT DAN DAFTAR SUBJEK / PASIEN")
         self.title.setAlignment(Qt.AlignCenter)
         self.main_layout.addWidget(self.title)
 
-        # Tabel Utama Pasien dengan Tampilan User Friendly & Modern Clinical (Kolom ditambah jadi 7)
+        # Tabel Utama (8 Kolom Presisi UI)
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["ID", "Nama Pasien", "Umur", "Jenis Kelamin", "Tanggal Input", "Aksi", "Hapus"])
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(["ID", "Nama Pasien", "Umur", "Jenis Kelamin", "Email", "Tanggal Input", "Aksi", "Hapus"])
         
-        # Pengaturan Grid Tabel agar Rapi dan Terstruktur
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) 
-        header.setSectionResizeMode(1, QHeaderView.Stretch)          
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.Stretch) 
-        header.setSectionResizeMode(6, QHeaderView.Stretch) # Kolom Hapus di paling kanan dibuat Stretch simetris
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # ID
+        header.setSectionResizeMode(1, QHeaderView.Stretch)          # Nama
+        header.setSectionResizeMode(2, QHeaderView.Stretch)          # Umur
+        header.setSectionResizeMode(3, QHeaderView.Stretch)          # Jenis Kelamin
+        header.setSectionResizeMode(4, QHeaderView.Stretch)          # Email
+        header.setSectionResizeMode(5, QHeaderView.Stretch)          # Tanggal Input
+        header.setSectionResizeMode(6, QHeaderView.Stretch)          # Aksi (Detail)
+        header.setSectionResizeMode(7, QHeaderView.Stretch)          # Hapus
         
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setFocusPolicy(Qt.NoFocus)
-        self.table.setShowGrid(False)  # Menghilangkan garis pembatas kaku agar tampilan modern kustom
+        self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
 
         self.main_layout.addWidget(self.table)
 
-        # Tombol Refresh manual di bawah tabel
+        # Tombol Refresh Manual
         self.btn_layout = QHBoxLayout()
         self.refresh_btn = QPushButton("Perbarui Daftar")
         self.refresh_btn.setCursor(Qt.PointingHandCursor)
@@ -60,10 +60,7 @@ class HistoryPage(QWidget):
         self.main_layout.addLayout(self.btn_layout)
 
     def resizeEvent(self, event):
-        """Mekanisme Media Query Dinamis Sisi Tabel - Sinkron dengan Jendela Utama"""
         current_width = event.size().width()
-        
-        # Mengikuti breakpoint resolusi besar 1600px (dikurangi estimasi lebar sidebar)
         if current_width >= 1340:
             self.apply_history_media_styles(is_large=True)
         else:
@@ -72,35 +69,19 @@ class HistoryPage(QWidget):
         super().resizeEvent(event)
 
     def apply_history_media_styles(self, is_large):
-        """Penerapan Aturan Skalabilitas Teks, Baris Tabel, dan Tombol Refresh"""
-        self.current_is_large = is_large  # Amankan status resolusi untuk rendering tombol sel
+        self.current_is_large = is_large
         
         if is_large:
-            font_title = "20pt"
-            font_table = "11pt"
-            font_btn = "12pt"
-            
-            row_height = 65        
-            header_height = 58     
-            
-            refresh_btn_width = 300
-            refresh_btn_height = 50
-            title_margin_top = "60px"
-            title_margin_bottom = "30px"
+            font_title, font_table, font_btn = "20pt", "11pt", "12pt"
+            row_height, header_height = 65, 58
+            refresh_btn_width, refresh_btn_height = 300, 50
+            title_margin_top, title_margin_bottom = "60px", "30px"
         else:
-            font_title = "17pt"
-            font_table = "10pt"
-            font_btn = "10.5pt"
-            
-            row_height = 52        
-            header_height = 46     
-            
-            refresh_btn_width = 200
-            refresh_btn_height = 38
-            title_margin_top = "0px"
-            title_margin_bottom = "15px"
+            font_title, font_table, font_btn = "17pt", "10pt", "10.5pt"
+            row_height, header_height = 52, 46
+            refresh_btn_width, refresh_btn_height = 200, 38
+            title_margin_top, title_margin_bottom = "0px", "15px"
 
-        # 1. Update Margin dan Font Teks Judul Utama (Rata Tengah)
         self.title.setStyleSheet(f"""
             QLabel {{
                 font-size: {font_title}; 
@@ -111,7 +92,6 @@ class HistoryPage(QWidget):
             }}
         """)
 
-        # 2. Update Desain Header dan Baris Tabel Secara Profesional
         self.table.horizontalHeader().setFixedHeight(header_height)
         self.table.setStyleSheet(f"""
             QTableWidget {{
@@ -134,25 +114,23 @@ class HistoryPage(QWidget):
             }}
         """)
 
-        # Mengubah tinggi baris yang sudah ada di dalam tabel secara dinamis
         for i in range(self.table.rowCount()):
             self.table.setRowHeight(i, row_height)
             
-            # Update tombol Detail (Kolom 5)
-            container_detail = self.table.cellWidget(i, 5)
+            # Tombol Detail di Kolom 6
+            container_detail = self.table.cellWidget(i, 6)
             if container_detail:
                 btn_actual_detail = container_detail.findChild(QPushButton)
                 if btn_actual_detail:
                     self.style_action_button(btn_actual_detail, is_large, font_table, is_delete=False)
             
-            # Update tombol Hapus (Kolom 6)
-            container_hapus = self.table.cellWidget(i, 6)
+            # Tombol Hapus di Kolom 7
+            container_hapus = self.table.cellWidget(i, 7)
             if container_hapus:
                 btn_actual_hapus = container_hapus.findChild(QPushButton)
                 if btn_actual_hapus:
                     self.style_action_button(btn_actual_hapus, is_large, font_table, is_delete=True)
 
-        # 3. Update Dimensi & Desain Tombol Refresh Daftar
         self.refresh_btn.setFixedSize(refresh_btn_width, refresh_btn_height)
         self.refresh_btn.setStyleSheet(f"""
             QPushButton {{
@@ -168,21 +146,13 @@ class HistoryPage(QWidget):
         """)
 
     def style_action_button(self, button, is_large, font_size, is_delete=False):
-        """Utility khusus untuk merestrukturisasi skala ukuran tombol sel uji sinyal dan hapus"""
         btn_width = 130 if is_large else 105
         btn_height = 38 if is_large else 32  
         button.setFixedSize(btn_width, btn_height)
         
-        if is_delete:
-            # Desain Merah Klinis untuk Aksi Penghapusan Data
-            bg_color = "#dc2626"
-            bg_hover = "#b91c1c"
-            bg_pressed = "#991b1b"
-        else:
-            # Desain Biru Murni untuk Aksi Detail
-            bg_color = "#0284c7"
-            bg_hover = "#0369a1"
-            bg_pressed = "#075985"
+        bg_color = "#dc2626" if is_delete else "#0284c7"
+        bg_hover = "#b91c1c" if is_delete else "#0369a1"
+        bg_pressed = "#991b1b" if is_delete else "#075985"
             
         button.setStyleSheet(f"""
             QPushButton {{
@@ -198,7 +168,7 @@ class HistoryPage(QWidget):
         """)
 
     def load_patient_data(self):
-        """Menarik data dari SQLite dan memasukkannya ke dalam baris tabel secara dinamis"""
+        """Mengambil data dari DBManager dan memetakan ke tabel UI dengan presisi"""
         self.table.setRowCount(0)
         patients = self.db_manager.get_all_subjects()
         
@@ -211,38 +181,49 @@ class HistoryPage(QWidget):
         font_table = "11pt" if self.current_is_large else "10pt"
         
         for row_idx, patient in enumerate(patients):
-            sub_id, nama, umur, jk, tanggal = patient
-            
+            # TANGKAP 7 VAR KANONIKAL DARI DB:
+            # 0:id, 1:nama, 2:umur, 3:alamat, 4:email, 5:jenis_kelamin, 6:created_at
+            sub_id = patient[0]
+            nama = patient[1] if len(patient) > 1 and patient[1] else "-"
+            umur = patient[2] if len(patient) > 2 and patient[2] is not None else "-"
+            alamat = patient[3] if len(patient) > 3 and patient[3] else "-"
+            email = patient[4] if len(patient) > 4 and patient[4] else "-"
+            jk = patient[5] if len(patient) > 5 and patient[5] else "-"
+            tanggal = patient[6] if len(patient) > 6 and patient[6] else "-"
+
             patient_dict = {
                 "id": sub_id,
                 "nama": nama,
+                "email": email,
                 "umur": umur,
                 "jenis_kelamin": jk,
-                "alamat": "-", 
-                "email": "-"
+                "alamat": alamat
             }
 
             self.table.setRowHeight(row_idx, row_height)
 
-            # 1. Membuat Item Sel Data Pasien
+            # Buat Item Sel
             item_id = QTableWidgetItem(f"{sub_id}")
-            item_nama = QTableWidgetItem(nama)
-            item_umur = QTableWidgetItem(f"{umur} Tahun")
-            item_jk = QTableWidgetItem(jk)
+            item_nama = QTableWidgetItem(str(nama))
+            item_umur = QTableWidgetItem(f"{umur} Tahun" if umur != "-" else "-")
+            item_jk = QTableWidgetItem(str(jk))
+            item_email = QTableWidgetItem(str(email))
             item_tanggal = QTableWidgetItem(str(tanggal))
 
-            # 2. Set Seluruh Komponen Teks Menjadi Rata Tengah (Center Alignment)
-            for item in [item_id, item_nama, item_umur, item_jk, item_tanggal]:
+            # Set Rata Tengah
+            for item in [item_id, item_nama, item_umur, item_jk, item_email, item_tanggal]:
                 item.setTextAlignment(Qt.AlignCenter)
 
-            # Masukkan item terformat rata tengah ke tabel
+            # MASUKKAN TEPAT KE INDEKS KOLOM UI:
+            # 0: ID | 1: Nama Pasien | 2: Umur | 3: Jenis Kelamin | 4: Email | 5: Tanggal Input
             self.table.setItem(row_idx, 0, item_id)
             self.table.setItem(row_idx, 1, item_nama)
             self.table.setItem(row_idx, 2, item_umur)
             self.table.setItem(row_idx, 3, item_jk)
-            self.table.setItem(row_idx, 4, item_tanggal)
+            self.table.setItem(row_idx, 4, item_email)
+            self.table.setItem(row_idx, 5, item_tanggal)
 
-            # ================= KOLOM AKSI 1: TOMBOL DETAIL PASIEN =================
+            # Tombol Detail (Kolom 6)
             btn_test = QPushButton("Detail")  
             btn_test.setCursor(Qt.PointingHandCursor)
             self.style_action_button(btn_test, self.current_is_large, font_table, is_delete=False)
@@ -253,14 +234,12 @@ class HistoryPage(QWidget):
             layout_detail.addWidget(btn_test)
             layout_detail.setContentsMargins(0, 0, 0, 0)
             layout_detail.setAlignment(Qt.AlignCenter)
-            self.table.setCellWidget(row_idx, 5, container_detail)
+            self.table.setCellWidget(row_idx, 6, container_detail)
 
-            # ================= KOLOM AKSI 2: TOMBOL HAPUS PASIEN (BARU DI PALING KANAN) =================
+            # Tombol Hapus (Kolom 7)
             btn_hapus_row = QPushButton("Hapus")
             btn_hapus_row.setCursor(Qt.PointingHandCursor)
             self.style_action_button(btn_hapus_row, self.current_is_large, font_table, is_delete=True)
-            
-            # Hubungkan langsung ke fungsi konfirmasi hapus cepat row
             btn_hapus_row.clicked.connect(lambda checked, sid=sub_id, name=nama: self.proses_hapus_cepat_tabel(sid, name))
             
             container_hapus = QWidget()
@@ -268,7 +247,7 @@ class HistoryPage(QWidget):
             layout_hapus.addWidget(btn_hapus_row)
             layout_hapus.setContentsMargins(0, 0, 0, 0)
             layout_hapus.setAlignment(Qt.AlignCenter)
-            self.table.setCellWidget(row_idx, 6, container_hapus)
+            self.table.setCellWidget(row_idx, 7, container_hapus)
 
     def proses_hapus_cepat_tabel(self, subjek_id, nama_pasien):
         """Fungsi konfirmasi hapus rekaman langsung dari baris tabel."""
@@ -280,26 +259,27 @@ class HistoryPage(QWidget):
         )
         if tanya == QMessageBox.Yes:
             self.db_manager.hapus_rekaman_subjek(subjek_id)
-            self.load_patient_data()  # Langsung segarkan tampilan baris tabel
+            self.load_patient_data()  
             QMessageBox.information(self, "Terhapus", f"Data rekaman {nama_pasien} berhasil dihapus.")
 
     # ================= FUNGSI POP-UP DETAIL MODAL =================
     def buka_popup_detail(self, patient_data):
-        """Membuka Jendela Pop-up Modal responsif dengan teks analisis statis sistem pakar."""
+        """Membuka Jendela Pop-up Modal responsif dengan penanganan NoneType secara aman."""
         subjek_id = patient_data['id']
-        blob_gambar, teks_analisis_saved = self.db_manager.ambil_screenshot_terakhir(subjek_id)
         
-        if not blob_gambar:
-            QMessageBox.warning(self, "Data Kosong", "Rekaman grafik untuk subjek ini tidak ditemukan di database.")
+        res = self.db_manager.ambil_screenshot_terakhir(subjek_id)
+        if not res or res[0] is None:
+            QMessageBox.warning(self, "Data Kosong", f"Rekaman grafik untuk {patient_data['nama'].upper()} belum pernah disimpan / tidak ditemukan.")
             return
+
+        blob_gambar, teks_analisis_saved = res
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Rekaman Medis - {patient_data['nama'].upper()}")
         dialog.setStyleSheet("background-color: #f8fafc;")
         
         parent_widget = self.window()
-        parent_width = parent_widget.width()
-        parent_height = parent_widget.height()
+        parent_width, parent_height = parent_widget.width(), parent_widget.height()
         
         if self.current_is_large:
             lebar_dialog = int(parent_width * 0.70)
@@ -317,7 +297,8 @@ class HistoryPage(QWidget):
 
         # Header Biodata Pasien
         font_header = "12pt" if self.current_is_large else "10pt"
-        lbl_info = QLabel(f"Nama: {patient_data['nama']}  |  Umur: {patient_data['umur']} Tahun  |  Gender: {patient_data['jenis_kelamin']}")
+        email_str = patient_data.get('email', '-')
+        lbl_info = QLabel(f"Nama: {patient_data['nama']}  |  Gender: {patient_data['jenis_kelamin']}  |  Email: {email_str}  |  Umur: {patient_data['umur']} Tahun")
         lbl_info.setStyleSheet(f"font-weight: bold; font-size: {font_header}; color: #1e293b;")
         dialog_layout.addWidget(lbl_info)
 
@@ -331,35 +312,41 @@ class HistoryPage(QWidget):
         pixmap = QPixmap.fromImage(img)
         
         lebar_foto_dinamis = lebar_dialog - 40
-        tinggi_foto_dinamis = tinggi_dialog - 300
+        tinggi_foto_dinamis = tinggi_dialog - 330
         lbl_foto.setPixmap(pixmap.scaled(lebar_foto_dinamis, tinggi_foto_dinamis, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         dialog_layout.addWidget(lbl_foto)
 
-        # 2. AREA LAPORAN TEKS ANALISIS SISTEM PAKAR (KUNCI STATIS)
-        lbl_judul_analisis = QLabel("Hasil Analisis & Kesimpulan Klinis Pasien (Automated Expert System):")
+        # 2. AREA LAPORAN TEKS ANALISIS
+        lbl_judul_analisis = QLabel("Hasil Analisis & Kesimpulan Subjek (Automated Expert System):")
         lbl_judul_analisis.setStyleSheet("font-weight: bold; color: #475569; margin-top: 5px;")
         dialog_layout.addWidget(lbl_judul_analisis)
 
+        teks_deskripsi_eeg = (
+            "Electroencephalogram (EEG) merupakan salah satu teknik non-invasif, berfungsi untuk "
+            "merekam aktivitas listrik otak melalui elektroda yang diletakkan di permukaan kulit kepala manusia.\n\n"
+        )
+        
+        teks_lengkap_pop_up = teks_deskripsi_eeg + (teks_analisis_saved if teks_analisis_saved else "Data kesimpulan klinis kosong.")
+
         self.txt_analisis = QTextEdit()
-        self.txt_analisis.setFixedHeight(120)
-        # KUNCI UTAMA: Mengunci komponen agar bersifat Read-Only (Statis / Tidak bisa diedit)
+        self.txt_analisis.setFixedHeight(180)
         self.txt_analisis.setReadOnly(True)
         self.txt_analisis.setStyleSheet("""
             QTextEdit {
-                background-color: #f1f5f9; /* Diubah abu-abu terang sebagai indikator visual teks terkunci */
+                background-color: #f1f5f9;
                 border: 1px solid #cbd5e1;
                 border-radius: 6px;
                 padding: 10px;
                 font-family: 'Segoe UI', Arial;
-                font-size: 10pt;
+                font-size: 9.5pt;
                 line-height: 140%;
                 color: #334155;
             }
         """)
-        self.txt_analisis.setText(teks_analisis_saved if teks_analisis_saved else "Data kesimpulan klinis kosong.")
+        self.txt_analisis.setText(teks_lengkap_pop_up)
         dialog_layout.addWidget(self.txt_analisis)
 
-        # 3. BARIS TOMBOL AKSI BAWAH (Tombol Simpan Analisis Resmi Dihapus)
+        # 3. BARIS TOMBOL AKSI BAWAH
         aksi_layout = QHBoxLayout()
         font_btn = "11pt" if self.current_is_large else "9.5pt"
         btn_padding = "10px 20px" if self.current_is_large else "6px 14px"
@@ -383,7 +370,7 @@ class HistoryPage(QWidget):
         aksi_layout.addWidget(btn_tutup)
         dialog_layout.addLayout(aksi_layout)
 
-        # --- FUNGSI KLIK AKSI ---
+        # --- FUNGSI EKSPOR PDF ---
         def proses_unduh_pdf():
             teks_paragraf = self.txt_analisis.toPlainText().strip()
             path_simpan, _ = QFileDialog.getSaveFileName(self, "Simpan Laporan PDF", f"Laporan_EEG_{patient_data['nama']}.pdf", "PDF Files (*.pdf)")
@@ -405,27 +392,25 @@ class HistoryPage(QWidget):
                     story.append(Paragraph("LAPORAN RESMI MONITORING SIGNAL EEG", style_judul))
                     story.append(Spacer(1, 10))
                     
-                    meta_text = f"<b>ID Pasien:</b> #{patient_data['id']}<br/><b>Nama Pasien:</b> {patient_data['nama']}<br/><b>Umur / Gender:</b> {patient_data['umur']} Tahun / {patient_data['jenis_kelamin']}<br/>"
+                    meta_text = f"<b>ID Pasien:</b> #{patient_data['id']}<br/><b>Nama Pasien:</b> {patient_data['nama']}<br/><b>Email:</b> {patient_data.get('email', '-')}<br/><b>Umur / Gender:</b> {patient_data['umur']} Tahun / {patient_data['jenis_kelamin']}<br/>"
                     story.append(Paragraph(meta_text, styles['Normal']))
                     story.append(Spacer(1, 10))
                     
                     story.append(Paragraph("<b>Visualisasi Gelombang Otak Real-time Terakhir:</b>", styles['Normal']))
                     story.append(Spacer(1, 5))
-                    story.append(Image(cache_img_path, width=520, height=310))
-                    story.append(Spacer(1, 15))
+                    story.append(Image(cache_img_path, width=520, height=270))
+                    story.append(Spacer(1, 12))
                     
-                    story.append(Paragraph("<b>Hasil Analisis & Kesimpulan Rekam Medis:</b>", styles['Normal']))
-                    story.append(Spacer(1, 6))
-                    
+                    teks_pdf_formatted = teks_paragraf.replace('\n', '<br/>')
                     style_analisis_pdf = ParagraphStyle(
                         'AnalisisKlinisText',
                         parent=styles['Normal'],
-                        fontSize=10.5,
-                        leading=15,
-                        alignment=4, # Justify
+                        fontSize=9.5,
+                        leading=13.5,
+                        alignment=4,
                         textColor='#1e293b'
                     )
-                    story.append(Paragraph(teks_paragraf, style_analisis_pdf))
+                    story.append(Paragraph(teks_pdf_formatted, style_analisis_pdf))
                     
                     doc.build(story)
                     if os.path.exists(cache_img_path):
